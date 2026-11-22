@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Nenhuma API nativa é concedida ao frontend. Toda a interação com a janela passa por comandos próprios definidos em lib.rs.",
+  "windows": ["main"],
+  "permissions": []
+}

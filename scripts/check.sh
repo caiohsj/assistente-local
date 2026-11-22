@@ -19,3 +19,11 @@ echo "== compileall =="
 echo "== frontend build =="
 cd "$ROOT/frontend"
 npm run build
+
+if command -v cargo >/dev/null 2>&1; then
+  echo "== rust check =="
+  cargo check --manifest-path "$ROOT/frontend/src-tauri/Cargo.toml"
+else
+  echo "== rust check =="
+  echo "cargo não encontrado; etapa Rust ignorada"
+fi

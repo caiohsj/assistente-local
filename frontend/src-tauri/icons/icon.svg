@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Assistente Local">
+  <defs>
+    <radialGradient id="core" cx="40%" cy="32%" r="72%">
+      <stop offset="0%" stop-color="#d9f8ff"/>
+      <stop offset="24%" stop-color="#7fe6ff"/>
+      <stop offset="58%" stop-color="#5b8dff"/>
+      <stop offset="100%" stop-color="#7a4dff"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7ff4ff"/>
+      <stop offset="50%" stop-color="#6aa8ff"/>
+      <stop offset="100%" stop-color="#b56cff"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- halo externo -->
+  <circle cx="256" cy="256" r="208" fill="none" stroke="url(#ring)" stroke-width="6" opacity=".28"/>
+  <!-- anel orbital inclinado -->
+  <ellipse cx="256" cy="256" rx="204" ry="86" fill="none" stroke="url(#ring)" stroke-width="9" opacity=".85" transform="rotate(-28 256 256)" filter="url(#glow)"/>
+  <!-- núcleo -->
+  <circle cx="256" cy="256" r="126" fill="url(#core)" filter="url(#glow)"/>
+  <circle cx="256" cy="256" r="126" fill="none" stroke="#c9f3ff" stroke-width="4" opacity=".55"/>
+  <!-- brilho interno -->
+  <ellipse cx="214" cy="204" rx="52" ry="32" fill="#ffffff" opacity=".5" transform="rotate(-26 214 204)"/>
+  <!-- partículas -->
+  <circle cx="94" cy="168" r="9" fill="#8ff0ff"/>
+  <circle cx="424" cy="330" r="7" fill="#c08cff"/>
+  <circle cx="372" cy="104" r="6" fill="#a8d4ff"/>
+</svg>

@@ -225,10 +225,24 @@ O smoke falha se o backend ou o banco estiverem indisponíveis e, por padrão, e
 - Sem autenticação: o backend e a UI escutam somente em `127.0.0.1`. Não exponha essas portas na rede.
 - GPU NVIDIA é opcional; a ausência de `nvidia-smi` não quebra a ferramenta de sistema.
 
+## MVP Desktop (Tauri 2)
+
+O frontend também roda como aplicativo desktop residente: janela flutuante sem bordas, ícone na bandeja do sistema e menu **Abrir / Ocultar / Sair**. O backend Python **não** é necessário para esta camada — controles de conversa e microfone estão apenas visuais, preparados para a próxima etapa.
+
+```bash
+cd frontend
+npm install
+npm run tauri:dev     # aplicativo com bandeja e janela nativa (Vite na porta 5180)
+npm run tauri:build   # gera .deb/AppImage em src-tauri/target/release/bundle/
+```
+
+Para pré-visualizar só a interface no navegador, use `npm run dev`. Requisitos de compilação no Linux, limitações do AppIndicator/GNOME e detalhes de segurança estão em [docs/desktop-mvp.md](docs/desktop-mvp.md).
+
 ## Próximas etapas
 
 1. Memória de longo prazo com fatos aprovados e busca SQLite FTS5.
 2. Múltiplas conversas e busca no histórico.
 3. Push-to-talk, STT e TTS sob demanda.
-4. Empacotamento com Tauri e mascote flutuante.
-5. Integração com calendário/e-mail. Avaliar WhatsApp apenas por integração oficial.
+4. ~~Empacotamento com Tauri e mascote flutuante.~~ **Concluído** — ver MVP Desktop acima.
+5. Ligar os controles visuais ao backend FastAPI/llama.cpp sem reconstruir os componentes.
+6. Integração com calendário/e-mail. Avaliar WhatsApp apenas por integração oficial.

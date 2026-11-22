@@ -1,0 +1,18 @@
+[package]
+name = "assistente-local"
+version = "0.4.0"
+description = "Assistente virtual local - janela flutuante e bandeja do sistema"
+authors = ["Assistente Local"]
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+name = "assistente_local_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
