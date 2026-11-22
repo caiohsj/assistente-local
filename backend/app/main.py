@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     await close_llm()
 
 
-app = FastAPI(title="Assistente Local API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Assistente Local API", version="0.3.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[],
@@ -93,6 +93,7 @@ async def health(
             "enabled": registry.enabled,
             "files": registry.file_family_enabled,
             "system": registry.system_family_enabled,
+            "apps": registry.apps_family_enabled,
             "roots": len(settings.read_roots_list) if registry.file_family_enabled else 0,
             "count": len(registry.tools),
         },

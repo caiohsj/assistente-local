@@ -2,7 +2,9 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,10 +15,74 @@ from .db import add_tool_call
 from .prompts import build_system_prompt
 from .schemas import ToolCallSummary
 from .tools import ToolError, ToolRegistry
+from .tools.apps import audit_arguments
 
 logger = logging.getLogger(__name__)
 
 MAX_AUDIT_ARGS_CHARS = 1000
+
+OPEN_VERBS = (
+    "abra",
+    "abre",
+    "abrir",
+    "inicie",
+    "iniciar",
+    "lance",
+    "lançar",
+    "lancar",
+    "launch",
+    "open",
+    "start",
+)
+URL_MARKERS = ("http://", "https://", "www.", "site", "pagina", "link", "url")
+FILE_MARKERS = (
+    "arquivo",
+    "documento",
+    "pasta",
+    "diretorio",
+    ".txt",
+    ".pdf",
+    ".env",
+    "/",
+    "~",
+    "\\",
+)
+QUESTION_MARKERS = (
+    "voce pode",
+    "você pode",
+    "consegue",
+    "conseguiria",
+    "suporta",
+    "possivel",
+)
+
+
+def _normalize_text(text: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", text)
+    return decomposed.encode("ascii", "ignore").decode("ascii").casefold()
+
+
+def _forced_open_tool(message: Any, registry: "ToolRegistry") -> str | None:
+    """Força a ferramenta de abertura quando o pedido atual é explícito.
+
+    O histórico pode conter respostas antigas dizendo que um app não estava
+    instalado. Sem isso, o modelo responde copiando essas mensagens em vez de
+    tentar de novo — mesmo depois de a instalação ter mudado.
+    """
+    if not isinstance(message, str) or not message.strip():
+        return None
+    text = _normalize_text(message)
+    if "?" in text and any(marker in text for marker in QUESTION_MARKERS):
+        return None
+    if not any(re.search(rf"\b{re.escape(verb)}\b", text) for verb in OPEN_VERBS):
+        return None
+    if "open_url" in registry.tools and any(marker in text for marker in URL_MARKERS):
+        return "open_url"
+    if any(marker in text for marker in FILE_MARKERS):
+        return None
+    if "open_app" in registry.tools:
+        return "open_app"
+    return None
 
 
 @dataclass
@@ -50,6 +116,10 @@ def _summary_for(name: str, arguments: dict, payload: dict) -> str:
         return f"listou {result.get('count', 0)} itens"
     if name == "search_text":
         return f"buscou “{arguments.get('query', '')}”"
+    if name == "open_app":
+        return f"abriu {result.get('app') or arguments.get('app', 'aplicativo')}"
+    if name == "open_url":
+        return f"abriu {result.get('host') or 'site'}"
     return name
 
 
@@ -64,6 +134,9 @@ async def execute_tool(
     audit_args = arguments
     if not isinstance(arguments, dict):
         audit_args = {"_raw": str(arguments)[:MAX_AUDIT_ARGS_CHARS]}
+    else:
+        # open_url guarda só scheme://host; open_app guarda só o nome pedido.
+        audit_args = audit_arguments(name, arguments)
 
     payload: dict
     error_code: str | None = None
@@ -156,10 +229,20 @@ async def run_agent(
     settings: Settings,
 ) -> AgentResult:
     tools = registry.openai_tools()
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": build_system_prompt(registry.enabled)}
-    ]
-    messages.extend({"role": item["role"], "content": item["content"]} for item in history)
+    system_message = {"role": "system", "content": build_system_prompt(registry.enabled)}
+    current = next(
+        (item for item in reversed(history) if item.get("role") == "user"), None
+    )
+    forced_tool = _forced_open_tool(current.get("content") if current else None, registry)
+
+    if forced_tool and current is not None:
+        # Pedidos explícitos de abertura não precisam do histórico: mensagens
+        # antigas com falhas levam o modelo a responder sem chamar a ferramenta.
+        context = [current]
+    else:
+        context = history
+    messages: list[dict[str, Any]] = [system_message]
+    messages.extend({"role": item["role"], "content": item["content"]} for item in context)
 
     summaries: list[ToolCallSummary] = []
     rounds = 0
@@ -179,7 +262,16 @@ async def run_agent(
         }
         if tools:
             request["tools"] = tools
-            request["tool_choice"] = "auto" if can_call else "none"
+            # Só força na primeira rodada: nas seguintes o modelo precisa poder
+            # responder com o resultado da ferramenta em vez de chamá-la de novo.
+            effective_forced = forced_tool if rounds == 0 else None
+            if can_call and effective_forced in registry.tools:
+                request["tool_choice"] = {
+                    "type": "function",
+                    "function": {"name": effective_forced},
+                }
+            else:
+                request["tool_choice"] = "auto" if can_call else "none"
 
         completion = await llm.chat.completions.create(**request)
         message = completion.choices[0].message

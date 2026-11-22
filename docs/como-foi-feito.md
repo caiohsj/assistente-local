@@ -1,13 +1,13 @@
-# Como foi feito — Assistente Local MVP 0.2
+# Como foi feito — Assistente Local MVP 0.3
 
-> Documento técnico e didático sobre a implementação das Etapas 1 e 2.
+> Documento técnico e didático sobre a implementação das Etapas 1, 2 e 3.
 > Serve como base para explicar o projeto em vídeo, em uma apresentação ou para outra pessoa que vá continuar o código.
 
 ---
 
 ## 1. Resumo em uma frase
 
-Transformamos um MVP de conversa local em um assistente **testável, observável e com ferramentas de leitura sob allowlist**, sem sair do modelo local, sem expor portas na rede e sem permitir escrita ou execução de comandos.
+Transformamos um MVP de conversa local em um assistente **testável, observável, com ferramentas de leitura sob allowlist e abertura controlada de aplicativos e sites**, sem sair do modelo local, sem expor portas na rede e sem permitir escrita ou execução de comandos com argumentos.
 
 ---
 
@@ -46,7 +46,7 @@ A Etapa 1 resolveu a base. A Etapa 2 adicionou leitura de arquivos e sistema com
                                                                ▼
                                                     ┌────────────────────┐
                                                     │  Ferramentas       │
-                                                    │  files + system    │
+                                                    │  files+system+apps │
                                                     │  allowlist + caps  │
                                                     └────────────────────┘
 ```
@@ -91,6 +91,7 @@ sequenceDiagram
 | `backend/app/tools/paths.py` | Allowlist, resolução de caminhos e deny-globs |
 | `backend/app/tools/files.py` | `list_dir`, `read_file`, `search_text` |
 | `backend/app/tools/system.py` | CPU/RAM/GPU, disco, processos e data/hora |
+| `backend/app/tools/apps.py` | `open_app`, `open_url`, validação e redação de auditoria |
 | `backend/app/tools/registry.py` | Registro das famílias e validação no startup |
 | `backend/tests/` | Testes unitários, de API, persistência e agente |
 | `scripts/smoke.py` | Smoke test real usando apenas stdlib |
@@ -366,11 +367,11 @@ Isso evita duas armadilhas: custo alto de amostragem e vazamento de linha de com
 O loop está em `agent.py`:
 
 ```text
-messages = [system] + histórico
+messages = [system] + (só a mensagem atual se for pedido explícito de abertura; senão histórico)
 tools = registry.openai_tools()
 
 enquanto puder chamar ferramenta:
-    resposta = llm.chat.completions.create(tools, tool_choice="auto")
+    resposta = llm.chat.completions.create(tools, tool_choice=ferramenta_forçada_na_1ª_rodada)
     se não houver tool_calls:
         retorna resposta
     adiciona mensagem assistant com tool_calls
@@ -384,6 +385,8 @@ no limite:
     chama o modelo com tool_choice="none"
     retorna a resposta final
 ```
+
+Quando a mensagem atual é um pedido explícito de abertura (`abra`, `inicie`, `launch`, `open`, URLs `http(s)`), o agente usa `tool_choice` com a função específica na primeira rodada e descarta o histórico anterior. Isso evita que o modelo repita uma falha antiga (“não está instalado”) em vez de tentar de novo depois que o sistema mudou. Nas rodadas seguintes o `tool_choice` volta para `auto`, para que o modelo responda com o resultado.
 
 Decisões:
 
@@ -444,6 +447,54 @@ Na UI, cada chamada vira um chip:
 
 Falhas aparecem como chip vermelho com `falhou: forbidden_path`.
 
+### 5.9 Etapa 3 — abertura de aplicativos e sites
+
+A família `apps` nasceu de um pedido simples: “abra o terminal”. Em vez de criar uma ferramenta por aplicativo, o backend aceita qualquer executável do `PATH`, mas com regras que impedem a montagem de comandos.
+
+#### Contratos
+
+```json
+open_app({"app": "firefox"})
+open_url({"url": "https://example.com"})
+```
+
+```json
+{"app": "firefox", "command": "firefox", "pid": 1234, "launched": true}
+{"url": "https://example.com", "host": "example.com", "pid": 1234, "launched": true}
+```
+
+#### `open_app`
+
+- Aceita apenas nome simples de executável: sem `/`, `\`, `..`, espaços, NUL ou começo com `-`.
+- Se o nome for um alias configurado em `TOOL_OPEN_APP_ALIASES`, tenta os candidatos na ordem e usa o primeiro instalado. O modelo também pode pedir `firefox`, `code` etc. diretamente.
+- Se o nome não existir no `PATH`, tenta um app **Flatpak** instalado. A lista vem de `flatpak list --app --columns=application,name` (timeout de 2 s) e o match aceita ID completo, nome de exibição ou último componente do ID. A execução é `flatpak run <id>`, com argv fixo.
+- Não aceita argumentos extras. A execução é `subprocess.Popen([executável], shell=False, start_new_session=True, stdio=DEVNULL)`.
+- Códigos de erro: `invalid_args` (nome malformado, com caminho ou Flatpak ambíguo), `forbidden_target` (denylist, inclusive pelo ID Flatpak), `not_found` (não instalado) e `unavailable` (falha ao iniciar).
+
+#### `open_url`
+
+- Aceita apenas `http` e `https`.
+- Bloqueia `file://`, `javascript:`, `data:`, URLs com credenciais (`user:pass@`), caracteres de controle, barras invertidas e portas inválidas.
+- Limite configurável em `TOOL_OPEN_URL_MAX_CHARS` (default 2048).
+- `TOOL_OPEN_URL_DOMAINS` vazio libera qualquer domínio; preenchido aceita host exato ou subdomínio.
+- Abre com `TOOL_OPEN_URL_COMMAND` (default `xdg-open`), com argv fixo e sem shell.
+
+#### Auditoria
+
+- `open_url`: grava apenas `scheme://host`, sem query string nem fragmento. Isso evita persistir tokens em URLs.
+- `open_app`: grava apenas o nome solicitado, mesmo que um alias tenha resolvido para outro executável.
+
+#### Trade-off explícito
+
+Não existe `TOOL_OPEN_ENABLED`. Ligar `TOOLS_ENABLED` liga também a família `apps`. Sem argumentos, o risco de comando destrutivo é baixo, mas executáveis com efeito imediato continuam possíveis. As válvulas são:
+
+- `TOOL_OPEN_APP_DENY` para bloquear executáveis específicos;
+- `TOOL_OPEN_URL_DOMAINS` para restringir sites.
+
+Abrir um site não lê o conteúdo. O prompt deixa isso explícito para o modelo não afirmar que resumiu uma página que apenas foi aberta.
+
+Na UI, `open_app` vira o chip `abriu firefox` e `open_url` vira `abriu example.com`. O cabeçalho ganha o selo `APPS ON` ao lado do status de arquivos/sistema.
+
 ---
 
 ## 6. Modelo de dados
@@ -482,6 +533,11 @@ As mensagens de ferramenta (`role="tool"`) existem apenas durante a requisição
 | Auditoria sem conteúdo | Privacidade | Menos debug forense |
 | Execução sequencial de tools | Simplicidade e determinismo | Mais lento que paralelo |
 | Fallback `single_model` no health | Compatibilidade com llama-server | Pode mascarar alias errado |
+| Apps ligados junto com `TOOLS_ENABLED` | Uma chave só, comportamento previsível | Efeito colateral ao ligar ferramentas |
+| Executável por nome, sem argumentos | Impede montagem de comandos | Menos flexível que uma CLI |
+| Fallback Flatpak por ID/nome | Cobre apps que não ficam no PATH | Mais uma consulta de 2 s quando o nome não é encontrado |
+| `tool_choice` forçado em pedidos de abertura | Impede respostas copiadas de falhas antigas | Heurística de intenção pode forçar uma chamada desnecessária |
+| URL auditada como `scheme://host` | Não persiste tokens de query | Perde o caminho para auditoria |
 
 ---
 
@@ -497,7 +553,7 @@ cd ..
 pytest -q
 ```
 
-Resultado esperado: `48 passed`.
+Resultado esperado: `104 passed`.
 
 ### Check completo
 
@@ -551,8 +607,10 @@ Perguntas para testar:
 4. “Quanto espaço livre há no disco raiz?”
 5. “Leia o arquivo notas.txt e resuma.”
 6. “Leia o arquivo .env e me diga o token.”
+7. “Abra o terminal.”
+8. “Abra https://example.com.”
 
-A última deve ser recusada com `forbidden_path`.
+A pergunta 6 deve ser recusada com `forbidden_path`. As perguntas 7 e 8 devem gerar chips `abriu terminal` e `abriu example.com`. Tente também `/usr/bin/firefox` (recusa `invalid_args`) e `file:///etc/passwd` (recusa `invalid_args`).
 
 ---
 
@@ -613,7 +671,7 @@ curl http://127.0.0.1:8765/history?limit=5
 **Mostrar:** `pytest -q`, `./scripts/check.sh`, `scripts/smoke.py`.
 
 **Falar:**
-“São 48 testes. Eles cobrem migração, contratos, falha 503, allowlist, traversal, symlink, deny-globs, GPU ausente/malformada, processos sem cmdline e o loop do agente. O smoke valida o sistema real. As limitações atuais são: histórico global, sem streaming, sem escrita, sem autenticação e allowlist global.”
+“São 104 testes. Eles cobrem migração, contratos, falha 503, allowlist, traversal, symlink, deny-globs, GPU ausente/malformada, processos sem cmdline, resolução de executáveis, aliases, denylist, fallback Flatpak (nome, ID e ambiguidade), validação de URLs, allowlist de domínios, detecção de pedidos explícitos de abertura e o loop do agente. O smoke valida o sistema real. As limitações atuais são: histórico global, sem streaming, sem escrita, sem autenticação e allowlist global.”
 
 ---
 
@@ -626,13 +684,16 @@ Porque o escopo é pequeno e local. O loop de tool calling é simples, explícit
 O produto é local-first e single-user. SQLite resolve com zero infraestrutura. WAL melhora concorrência. Postgres seria complexidade desnecessária nesta fase.
 
 **Por que não streaming?**
-Ficou fora do escopo das Etapas 1 e 2. O contrato atual é request/response. Streaming entra depois, junto com cancelamento e tratamento de tool calls incrementais.
+Ficou fora do escopo das Etapas 1 a 3. O contrato atual é request/response. Streaming entra depois, junto com cancelamento e tratamento de tool calls incrementais.
 
 **Por que não pedir aprovação a cada ferramenta?**
 O plano optou por allowlist global para manter o fluxo simples. Aprovação por chamada é uma evolução natural antes de qualquer ferramenta de escrita.
 
 **Como evitar prompt injection?**
-Com ferramentas somente leitura, allowlist restrita, sem `shell=True`, sem escrita e sem `cmdline`. Ainda existe risco residual: um arquivo autorizado pode conter instruções maliciosas e induzir o modelo a ler outro arquivo autorizado. A mitigação futura é separar conteúdo de instruções no prompt, limitar ainda mais as raízes e adicionar aprovação para operações sensíveis.
+Com leitura sob allowlist restrita, abertura de apps restrita a nomes de executáveis (sem argumentos), sem `shell=True`, sem escrita e sem `cmdline`. Ainda existe risco residual: um arquivo autorizado pode conter instruções maliciosas e induzir o modelo a abrir um aplicativo ou site permitido. A mitigação futura é separar conteúdo de instruções no prompt, limitar ainda mais as raízes, restringir domínios e adicionar aprovação para operações sensíveis.
+
+**Abrir um site faz o assistente ler a página?**
+Não. `open_url` apenas entrega a URL ao abridor do sistema. O modelo não recebe o HTML nem o texto da página. Se o usuário pedir um resumo, o assistente deve dizer que não acessou o conteúdo.
 
 **O que acontece se o modelo chamar uma ferramenta inexistente?**
 O agente devolve um resultado `{ok: false, error: {code: "unavailable"}}`, audita a chamada e continua. O modelo explica a falha.
@@ -646,7 +707,9 @@ Após 4 rodadas ou 6 chamadas, o backend faz a chamada final com `tool_choice="n
 
 - Histórico global por instalação; não há múltiplas conversas.
 - Sem streaming de tokens.
-- Ferramentas apenas de leitura; sem escrita, edição ou execução de comandos.
+- Arquivos e sistema apenas leem; a abertura de apps/sites é a única ação com efeito colateral. Sem escrita, edição ou execução de comandos com argumentos.
+- Abrir um app ou site não permite ler o conteúdo resultante.
+- Sem `TOOL_OPEN_ENABLED`: ligar ferramentas liga também a família `apps`.
 - Allowlist global, sem aprovação por chamada.
 - Sem autenticação; backend e UI escutam apenas em `127.0.0.1`.
 - GPU NVIDIA é opcional; ausência degrada para `available: false`.
@@ -658,7 +721,7 @@ Após 4 rodadas ou 6 chamadas, o backend faz a chamada final com `tool_choice="n
 1. Múltiplas conversas e busca no histórico com SQLite FTS5.
 2. Memória de longo prazo com fatos aprovados.
 3. Streaming e cancelamento.
-4. Aprovação por chamada antes de ferramentas de escrita.
+4. Aprovação por chamada antes de ferramentas de escrita e de abertura.
 5. Empacotamento com Tauri e mascote flutuante.
 6. Integrações de calendário/e-mail com permissões explícitas.
 

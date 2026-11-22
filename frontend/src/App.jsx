@@ -9,9 +9,12 @@ function toolLabel(call) {
 
 function allowlistLabel(tools) {
   if (!tools?.enabled) return "FERRAMENTAS OFF";
-  if (tools.files) return `ARQUIVOS: ${tools.roots} RAIZ${tools.roots === 1 ? "" : "ES"}`;
-  if (tools.system) return "SISTEMA ON";
-  return "SEM FERRAMENTAS";
+  const parts = [];
+  if (tools.files) {
+    parts.push(`ARQUIVOS: ${tools.roots} RAIZ${tools.roots === 1 ? "" : "ES"}`);
+  }
+  if (tools.system) parts.push("SISTEMA ON");
+  return parts.length ? parts.join(" · ") : "SEM FERRAMENTAS";
 }
 
 export default function App() {
@@ -80,9 +83,10 @@ export default function App() {
         <div className="avatar" aria-hidden="true">✦</div>
         <div><h1>Assistente Local</h1><p><i className="dot" />{status}</p></div>
         <div className="tags">
-          <span className={`tool-tag ${tools?.files ? "on" : "off"}`}>
+          <span className={`tool-tag ${tools?.files || tools?.system ? "on" : "off"}`}>
             {allowlistLabel(tools)}
           </span>
+          {tools?.apps && <span className="tool-tag on">APPS ON</span>}
           <span className="local-tag">LOCAL</span>
         </div>
       </header>
@@ -117,7 +121,7 @@ export default function App() {
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(e); } }} />
         <button disabled={busy || !text.trim()} aria-label="Enviar">↑</button>
       </form>
-      <footer>Assistente local · MVP 0.2 · Sem serviços em nuvem</footer>
+      <footer>Assistente local · MVP 0.3 · Sem serviços em nuvem</footer>
     </main>
   );
 }

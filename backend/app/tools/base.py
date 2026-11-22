@@ -3,6 +3,7 @@ from typing import Any, Callable
 
 TOOL_ERROR_CODES = {
     "forbidden_path",
+    "forbidden_target",
     "not_found",
     "binary_file",
     "too_large",

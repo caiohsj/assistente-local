@@ -2,6 +2,7 @@ from functools import partial
 from typing import Any
 
 from ..config import Settings
+from .apps import open_app, open_url
 from .base import ToolSpec
 from .files import list_dir, read_file, search_text
 from .paths import validate_roots
@@ -19,6 +20,7 @@ class ToolRegistry:
         self._tools: dict[str, ToolSpec] = {}
         self.file_family_enabled = False
         self.system_family_enabled = False
+        self.apps_family_enabled = False
 
     def register(self, spec: ToolSpec) -> None:
         if spec.name in self._tools:
@@ -55,6 +57,26 @@ class ToolRegistry:
                 "gpu_query_timeout_seconds": self.settings.gpu_query_timeout_seconds,
                 "process_list_default_limit": self.settings.process_list_default_limit,
                 "process_list_max_limit": self.settings.process_list_max_limit,
+            },
+            "apps": {
+                "enabled": self.apps_family_enabled,
+                "aliases": (
+                    self.settings.open_app_aliases_map
+                    if self.apps_family_enabled
+                    else {}
+                ),
+                "deny": (
+                    self.settings.open_app_deny_list
+                    if self.apps_family_enabled
+                    else []
+                ),
+                "url_domains": (
+                    self.settings.open_url_domains_list
+                    if self.apps_family_enabled
+                    else []
+                ),
+                "url_max_chars": self.settings.tool_open_url_max_chars,
+                "url_command": self.settings.tool_open_url_command,
             },
             "agent": {
                 "max_tool_rounds": self.settings.agent_max_tool_rounds,
@@ -215,6 +237,55 @@ def _register_system(registry: ToolRegistry, settings: Settings) -> None:
     registry.system_family_enabled = True
 
 
+def _register_apps(registry: ToolRegistry, settings: Settings) -> None:
+    registry.register(
+        ToolSpec(
+            name="open_app",
+            family="apps",
+            description=(
+                "Abre um aplicativo instalado pelo nome do executável (por exemplo, "
+                "'firefox' ou 'code') ou pelo nome/ID de um app Flatpak. Aceita apenas "
+                "o nome, sem caminho nem argumentos. O processo é iniciado em segundo plano."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "app": {
+                        "type": "string",
+                        "description": "Nome simples do executável, sem caminho nem opções.",
+                    }
+                },
+                "required": ["app"],
+                "additionalProperties": False,
+            },
+            handler=partial(open_app, settings=settings),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="open_url",
+            family="apps",
+            description=(
+                "Abre uma URL http ou https no navegador padrão. Abrir um site não lê "
+                "nem resume o conteúdo da página."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL completa, começando com http:// ou https://.",
+                    }
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+            handler=partial(open_url, settings=settings),
+        )
+    )
+    registry.apps_family_enabled = True
+
+
 def build_registry(settings: Settings) -> ToolRegistry:
     registry = ToolRegistry(settings)
     if not settings.tools_enabled:
@@ -227,4 +298,5 @@ def build_registry(settings: Settings) -> ToolRegistry:
         _register_files(registry, settings)
 
     _register_system(registry, settings)
+    _register_apps(registry, settings)
     return registry

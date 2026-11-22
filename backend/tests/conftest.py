@@ -17,7 +17,11 @@ class FakeCompletions:
         self.calls: list[dict] = []
 
     async def create(self, **kwargs):
-        self.calls.append(kwargs)
+        # Copia as mensagens para o registro não mudar quando o agente acrescenta
+        # tool calls ao longo do loop.
+        self.calls.append(
+            {**kwargs, "messages": [dict(message) for message in kwargs["messages"]]}
+        )
         if not self.responses:
             raise RuntimeError("fake sem respostas")
         item = self.responses.pop(0)
@@ -63,6 +67,17 @@ def isolated_db(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "db_path", str(tmp_path / "assistant.sqlite3"))
     monkeypatch.setattr(settings, "tools_enabled", False)
     monkeypatch.setattr(settings, "tool_read_roots", "")
+    # A família apps liga junto com tools_enabled; zera as chaves para os testes
+    # não herdarem valores de um .env local.
+    monkeypatch.setattr(settings, "tool_open_url_command", "xdg-open")
+    monkeypatch.setattr(settings, "tool_open_url_domains", "")
+    monkeypatch.setattr(settings, "tool_open_url_max_chars", 2048)
+    monkeypatch.setattr(
+        settings,
+        "tool_open_app_aliases",
+        "terminal=x-terminal-emulator|gnome-terminal|konsole|alacritty|kitty|xterm",
+    )
+    monkeypatch.setattr(settings, "tool_open_app_deny", "")
     init_db()
     yield
     app.dependency_overrides.clear()

@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     process_list_max_limit: int = 50
     gpu_query_timeout_seconds: float = 2.0
 
+    # Abertura de aplicativos e sites (Etapa 3). A família `apps` liga junto com
+    # TOOLS_ENABLED; não há chave própria de habilitação.
+    tool_open_url_command: str = "xdg-open"
+    tool_open_url_domains: str = ""
+    tool_open_url_max_chars: int = 2048
+    tool_open_app_aliases: str = (
+        "terminal=x-terminal-emulator|gnome-terminal|konsole|alacritty|kitty|xterm"
+    )
+    tool_open_app_deny: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
@@ -43,6 +53,38 @@ class Settings(BaseSettings):
     @property
     def deny_globs_list(self) -> list[str]:
         return [item.strip() for item in self.tool_deny_globs.split(",") if item.strip()]
+
+    @property
+    def open_url_domains_list(self) -> list[str]:
+        domains: list[str] = []
+        for item in self.tool_open_url_domains.split(","):
+            domain = item.strip().lower().strip(".")
+            if domain:
+                domains.append(domain)
+        return domains
+
+    @property
+    def open_app_deny_list(self) -> list[str]:
+        return [item.strip() for item in self.tool_open_app_deny.split(",") if item.strip()]
+
+    @property
+    def open_app_aliases_map(self) -> dict[str, list[str]]:
+        """Converte `nome=candidato1|candidato2,...` em um mapa."""
+        aliases: dict[str, list[str]] = {}
+        for item in self.tool_open_app_aliases.split(","):
+            entry = item.strip()
+            if not entry or "=" not in entry:
+                continue
+            name, _, raw_candidates = entry.partition("=")
+            name = name.strip().casefold()
+            candidates = [
+                candidate.strip()
+                for candidate in raw_candidates.split("|")
+                if candidate.strip()
+            ]
+            if name and candidates:
+                aliases[name] = candidates
+        return aliases
 
 
 settings = Settings()

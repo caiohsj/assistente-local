@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.agent import run_agent
+from app.agent import _forced_open_tool, _summary_for, run_agent
 from app.config import settings
 from app.db import connect
 from app.tools import ToolError, ToolRegistry, ToolSpec
@@ -28,6 +28,21 @@ def echo_registry():
             family="test",
         )
     )
+    return registry
+
+
+def open_registry():
+    registry = ToolRegistry(settings)
+    for name in ("open_app", "open_url"):
+        registry.register(
+            ToolSpec(
+                name=name,
+                description=f"Teste de {name}.",
+                parameters={"type": "object", "properties": {}},
+                handler=lambda **kwargs: {"launched": True},
+                family="apps",
+            )
+        )
     return registry
 
 
@@ -171,6 +186,91 @@ async def test_agent_invalid_json_and_unknown_tool(isolated_db):
         "invalid_args",
         "unavailable",
     ]
+
+
+def test_summary_for_apps_tools():
+    assert (
+        _summary_for(
+            "open_app",
+            {"app": "firefox"},
+            {"ok": True, "result": {"app": "firefox"}},
+        )
+        == "abriu firefox"
+    )
+    assert (
+        _summary_for(
+            "open_url",
+            {"url": "https://example.com"},
+            {"ok": True, "result": {"host": "example.com"}},
+        )
+        == "abriu example.com"
+    )
+    assert (
+        _summary_for(
+            "open_app",
+            {"app": "nao-existe"},
+            {"ok": False, "error": {"code": "not_found"}},
+        )
+        == "falhou: not_found"
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Abra o Telegram, por favor.", "open_app"),
+        ("abra o discord novamente", "open_app"),
+        ("ABRA o terminal", "open_app"),
+        ("inicie o kitty", "open_app"),
+        ("abra https://example.com/x", "open_url"),
+        ("Abra o site example.com", "open_url"),
+        ("Você pode abrir o Telegram?", None),
+        ("abra o arquivo notas.txt", None),
+        ("abra /usr/bin/firefox", None),
+        ("que horas são?", None),
+    ],
+)
+def test_forced_open_tool_only_for_explicit_open_requests(message, expected):
+    assert _forced_open_tool(message, open_registry()) == expected
+
+
+@pytest.mark.asyncio
+async def test_agent_retries_open_app_despite_stale_failure_in_history(isolated_db):
+    llm = FakeLLM()
+    llm.completions.responses.extend(
+        [
+            make_completion(
+                tool_calls=[make_tool_call("open_app", {"app": "Telegram"}, "call-tg")]
+            ),
+            make_completion("Aberto."),
+        ]
+    )
+    history = [
+        {"role": "user", "content": "Abra o Telegram, por favor."},
+        {
+            "role": "assistant",
+            "content": "O Telegram não está instalado no sistema.",
+        },
+        {"role": "user", "content": "Abra o Telegram, por favor."},
+    ]
+
+    result = await run_agent(llm, open_registry(), history, settings)
+
+    assert result.tool_calls[0].ok is True
+    first_request = llm.completions.calls[0]
+    assert first_request["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "open_app"},
+    }
+    first_messages = first_request["messages"]
+    assert first_messages[1] == {
+        "role": "user",
+        "content": "Abra o Telegram, por favor.",
+    }
+    # O histórico com a falha antiga não entra no contexto deste pedido.
+    assert len(first_messages) == 2
+    assert all(m["role"] != "assistant" for m in first_messages)
+    assert llm.completions.calls[1]["tool_choice"] == "auto"
 
 
 @pytest.mark.asyncio

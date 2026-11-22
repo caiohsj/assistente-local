@@ -1,8 +1,8 @@
-# Assistente Local — MVP 0.2
+# Assistente Local — MVP 0.3
 
 Base local-first: FastAPI + llama.cpp + SQLite + React/Vite.
 
-Esta versão entrega conversa local com histórico persistente e ferramentas de **leitura** (arquivos e sistema) sob allowlist. Não executa comandos, não escreve arquivos, não acessa WhatsApp/e-mail e não mantém microfone ativo.
+Esta versão entrega conversa local com histórico persistente, ferramentas de **leitura** (arquivos e sistema) sob allowlist e **abertura de aplicativos e sites**. Não executa comandos com argumentos, não escreve arquivos, não acessa WhatsApp/e-mail e não mantém microfone ativo.
 
 ## Requisitos
 
@@ -117,18 +117,58 @@ Regras de segurança:
 - Caminhos relativos partem da primeira raiz autorizada; `~` é expandido.
 - `..`, symlinks para fora das raízes, devices, FIFOs, sockets e deny-globs são recusados.
 - Raiz inválida com ferramentas ligadas impede o startup.
-- Ferramentas disponíveis: `list_dir`, `read_file`, `search_text`, `get_system_info`, `get_disk_usage`, `list_processes`, `get_current_datetime`.
+- Ferramentas de leitura disponíveis: `list_dir`, `read_file`, `search_text`, `get_system_info`, `get_disk_usage`, `list_processes`, `get_current_datetime`. A abertura de apps/sites está na seção seguinte.
 - `list_processes` não retorna `cmdline`. GPU usa `nvidia-smi` com argv fixo, `shell=False` e timeout; ausência degrada para `available: false`.
 - Toda chamada gera auditoria em `tool_calls` (`tool`, `args_json`, `ok`, `error_code`, `duration_ms`, `result_chars`), sem conteúdo de arquivos.
+
+### Abertura de aplicativos e sites (Etapa 3)
+
+A família `apps` (`open_app` e `open_url`) existe sempre que `TOOLS_ENABLED=true`. Não há `TOOL_OPEN_ENABLED`: **ligar ferramentas liga também a abertura de apps e sites**. Esse é um trade-off explícito.
+
+| Chave | Default | Observação |
+|---|---|---|
+| `TOOL_OPEN_URL_COMMAND` | `xdg-open` | Executável único, sem argumentos |
+| `TOOL_OPEN_URL_DOMAINS` | vazio | CSV de domínios; vazio libera qualquer host |
+| `TOOL_OPEN_URL_MAX_CHARS` | `2048` | Limite da URL |
+| `TOOL_OPEN_APP_ALIASES` | `terminal=x-terminal-emulator\|gnome-terminal\|konsole\|alacritty\|kitty\|xterm` | Candidatos tentados na ordem |
+| `TOOL_OPEN_APP_DENY` | vazio | CSV de executáveis bloqueados (aceita também IDs Flatpak) |
+
+Contratos:
+
+```json
+open_app({"app": "firefox"})
+open_url({"url": "https://example.com"})
+```
+
+Retornos:
+
+```json
+{"app": "firefox", "command": "firefox", "pid": 1234, "launched": true}
+{"url": "https://example.com", "host": "example.com", "pid": 1234, "launched": true}
+```
+
+Regras:
+
+- `open_app` aceita apenas nome simples de executável do `PATH`: sem `/`, `\`, `..`, espaços, NUL ou começo com `-`.
+- Se o nome for um alias configurado, os candidatos são tentados na ordem e o primeiro instalado é usado. O modelo também pode pedir `firefox`, `code` etc. diretamente.
+- Se o nome não existir no `PATH`, `open_app` tenta um app **Flatpak** instalado pelo ID completo, nome de exibição ou último componente do ID. Exemplos: `telegram` → `org.telegram.desktop`; `discord` → `com.discordapp.Discord`. A resposta inclui `app_id` nesse caso.
+- Não há argumentos extras: o modelo não consegue montar comandos. A execução usa `shell=False`, sessão nova e stdio em `DEVNULL`.
+- `open_url` aceita apenas `http` e `https`; bloqueia `file://`, `javascript:`, `data:`, URLs com credenciais (`user:pass@`) e caracteres de controle.
+- `TOOL_OPEN_URL_DOMAINS` vazio libera qualquer domínio; preenchido aceita host exato ou subdomínio.
+- Abrir um site **não** lê nem resume o conteúdo da página.
+- Pedidos explícitos como “abra o Telegram” sempre chamam a ferramenta na hora, mesmo que uma mensagem antiga na conversa tenha dito que não era possível. Para isso, o agente força o `tool_choice` e usa apenas a mensagem atual como contexto.
+- Auditoria: `open_url` grava apenas `scheme://host` (sem query string nem fragmento); `open_app` grava apenas o nome solicitado.
+
+As válvulas de segurança são `TOOL_OPEN_APP_DENY` (bloqueia executáveis específicos) e `TOOL_OPEN_URL_DOMAINS` (restringe sites). Sem argumentos, o risco de comando destrutivo é baixo, mas executáveis com efeito imediato continuam possíveis.
 
 ### Endpoints
 
 | Método | Rota | Uso |
 |---|---|---|
-| `GET` | `/health` | Backend, banco, modelo e ferramentas |
+| `GET` | `/health` | Backend, banco, modelo e famílias de ferramentas (`files`, `system`, `apps`) |
 | `GET` | `/history?limit=100` | Histórico (1–500, inclui linhas de erro) |
 | `POST` | `/chat` | Conversa com loop de ferramentas |
-| `GET` | `/tools` | Matriz de habilitação, raízes e caps |
+| `GET` | `/tools` | Matriz de habilitação, raízes, aliases, denylist, domínios e caps |
 | `POST` | `/tools/{name}` | Execução direta para depuração |
 
 ## Como validar
@@ -169,13 +209,18 @@ O smoke falha se o backend ou o banco estiverem indisponíveis e, por padrão, e
 3. Pare o `llama-server` e envie uma mensagem: a UI mostra erro, a pergunta permanece e o `/history` contém a linha de erro.
 4. Com `TOOLS_ENABLED=true` e `TOOL_READ_ROOTS` configurado, peça “que horas são”, “quanto de RAM”, “liste 5 processos”, “use o disco”, “leia o arquivo X”.
 5. Peça a leitura de `.env` ou de um caminho fora das raízes: a ferramenta deve recusar.
-6. Confirme no cabeçalho o indicador de allowlist e os chips das ferramentas usadas.
+6. Confirme no cabeçalho o indicador de allowlist, o selo `APPS ON` e os chips das ferramentas usadas.
+7. Com `TOOLS_ENABLED=true`, peça “abra o terminal” e “abra https://example.com”. Confirme os chips `abriu terminal` e `abriu example.com`.
+8. Peça um nome com caminho (`/usr/bin/firefox`) ou uma URL `file:///etc/passwd`: a ferramenta deve recusar.
+9. Se `TOOL_OPEN_URL_DOMAINS` estiver preenchido, peça um domínio fora da lista: a ferramenta deve recusar com `forbidden_target`.
+10. Confira em `tool_calls` que a URL foi gravada apenas como `scheme://host`, sem query string nem fragmento.
 
 ## Limitações atuais
 
 - Histórico **global** por instalação; ainda não há múltiplas conversas nem usuários.
 - Sem streaming de tokens.
-- Ferramentas apenas de leitura; não há escrita, execução de comandos ou aprovação por chamada.
+- Arquivos e sistema são somente leitura. A abertura de apps/sites é a única ação com efeito colateral; não há escrita, execução de comandos com argumentos nem aprovação por chamada.
+- Abrir um app ou site não permite ler o conteúdo resultante.
 - Allowlist é global e definida no `.env`.
 - Sem autenticação: o backend e a UI escutam somente em `127.0.0.1`. Não exponha essas portas na rede.
 - GPU NVIDIA é opcional; a ausência de `nvidia-smi` não quebra a ferramenta de sistema.

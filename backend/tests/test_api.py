@@ -117,18 +117,22 @@ def test_tools_endpoint_when_disabled(client):
     data = client.get("/tools").json()
     assert data["enabled"] is False
     assert data["tools"] == []
+    assert data["apps"]["enabled"] is False
+    assert data["apps"]["aliases"] == {}
     assert client.post("/tools/get_current_datetime", json={"args": {}}).status_code == 403
 
 
-def test_tools_without_roots_enable_only_system(isolated_db, monkeypatch):
+def test_tools_without_roots_enable_system_and_apps(isolated_db, monkeypatch):
     monkeypatch.setattr(settings, "tools_enabled", True)
     monkeypatch.setattr(settings, "tool_read_roots", "")
 
     registry = build_registry(settings)
     assert registry.file_family_enabled is False
     assert registry.system_family_enabled is True
+    assert registry.apps_family_enabled is True
     assert "read_file" not in registry.tools
     assert "get_system_info" in registry.tools
+    assert {"open_app", "open_url"} <= set(registry.tools)
 
 
 def test_invalid_root_fails_startup(isolated_db, monkeypatch, tmp_path):
@@ -144,8 +148,14 @@ def test_tool_invoke_and_chat_summary(tool_client):
     info = client.get("/tools").json()
     assert info["files"]["enabled"] is True
     assert info["system"]["enabled"] is True
+    assert info["apps"]["enabled"] is True
+    assert info["apps"]["url_command"] == "xdg-open"
+    assert "terminal" in info["apps"]["aliases"]
     names = {tool["name"] for tool in info["tools"]}
-    assert {"read_file", "get_current_datetime"} <= names
+    assert {"read_file", "get_current_datetime", "open_app", "open_url"} <= names
+
+    health = client.get("/health").json()
+    assert health["tools"]["apps"] is True
 
     direct = client.post("/tools/get_current_datetime", json={"args": {}})
     assert direct.status_code == 200
