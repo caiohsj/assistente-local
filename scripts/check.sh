@@ -16,8 +16,11 @@ echo "== pytest =="
 echo "== compileall =="
 "$PYTHON" -m compileall -q app tests
 
-echo "== frontend build =="
+echo "== frontend tests =="
 cd "$ROOT/frontend"
+npm test
+
+echo "== frontend build =="
 npm run build
 
 if command -v cargo >/dev/null 2>&1; then

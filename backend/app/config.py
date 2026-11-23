@@ -14,8 +14,12 @@ class Settings(BaseSettings):
     db_path: str = "./data/assistant.sqlite3"
     max_history_messages: int = 12
 
-    # HTTP
-    cors_origin_regex: str = r"^http://(127\.0\.0\.1|localhost):\d+$"
+    # HTTP — loopback (Vite) e origens exatas do WebView Tauri. Nunca use `*`.
+    cors_origin_regex: str = (
+        r"^(?:http://(?:127\.0\.0\.1|localhost):\d+"
+        r"|tauri://localhost"
+        r"|http://tauri\.localhost)$"
+    )
 
     # Ferramentas (Etapa 2). Listas em CSV para facilitar o uso em .env.
     tools_enabled: bool = False

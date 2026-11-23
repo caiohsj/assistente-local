@@ -1,4 +1,10 @@
-export default function AssistantHeader({ state, onHide, onDragStart }) {
+const CONNECTION_LABELS = {
+  checking: "conectando",
+  online: "online",
+  offline: "offline",
+};
+
+export default function AssistantHeader({ state = "active", connection = "checking", onHide, onDragStart }) {
   // Arrastar pelo cabeçalho usa um comando próprio do Rust em vez do
   // data-tauri-drag-region, que exigiria liberar permissão de plugin na ACL.
   function handleMouseDown(event) {
@@ -6,8 +12,13 @@ export default function AssistantHeader({ state, onHide, onDragStart }) {
     onDragStart?.();
   }
 
+  const connectionLabel = CONNECTION_LABELS[connection] ?? CONNECTION_LABELS.checking;
+
   return (
-    <header className="assistant-header" onMouseDown={handleMouseDown}>
+    <header
+      className={`assistant-header assistant-header--${state}`}
+      onMouseDown={handleMouseDown}
+    >
       <div className="assistant-header__brand">
         <span className="assistant-header__mark" aria-hidden="true">✦</span>
         <span className="assistant-header__titles">
@@ -16,9 +27,12 @@ export default function AssistantHeader({ state, onHide, onDragStart }) {
         </span>
       </div>
 
-      <span className={`assistant-header__live assistant-header__live--${state}`}>
+      <span
+        className={`assistant-header__live assistant-header__live--${connection}`}
+        title={`Backend: ${connectionLabel}`}
+      >
         <span className="assistant-header__live-dot" aria-hidden="true" />
-        <span>{state === "idle" ? "ocioso" : "online"}</span>
+        <span>{connectionLabel}</span>
       </span>
 
       <div className="assistant-header__actions">

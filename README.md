@@ -1,4 +1,4 @@
-# Assistente Local — MVP 0.3
+# Assistente Local — MVP 0.4
 
 Base local-first: FastAPI + llama.cpp + SQLite + React/Vite.
 
@@ -62,7 +62,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Abra o endereço mostrado pelo Vite, normalmente `http://127.0.0.1:5173`. Para apontar para outro backend, ajuste `VITE_API_BASE`.
+Abra o endereço mostrado pelo Vite, normalmente `http://127.0.0.1:5173`. Para apontar para outro backend, ajuste `VITE_API_BASE` (o fallback é `http://127.0.0.1:8765`). Como é uma variável `VITE_*`, ela é lida em tempo de build: em `npm run tauri:build`, defina-a antes de compilar.
 
 ## Configuração
 
@@ -80,9 +80,11 @@ Edite `backend/.env` conforme necessário.
 | `MAX_TOKENS` | `900` | Limite por resposta |
 | `DB_PATH` | `./data/assistant.sqlite3` | SQLite local |
 | `MAX_HISTORY_MESSAGES` | `12` | Contexto enviado ao modelo |
-| `CORS_ORIGIN_REGEX` | `^http://(127\.0\.0\.1\|localhost):\d+$` | Apenas loopback |
+| `CORS_ORIGIN_REGEX` | `^(?:http://(?:127\.0\.0\.1\|localhost):\d+\|tauri://localhost\|http://tauri\.localhost)$` | Loopback (Vite) + origens exatas do WebView Tauri |
 
 O banco usa WAL, `busy_timeout=5000` e `foreign_keys=ON`. A coluna `messages.error` é migrada automaticamente em bancos antigos. Falhas do modelo persistem a pergunta e uma linha de erro (`error=1`), retornam **503** e não reenviam a linha de erro ao modelo.
+
+> **Atualização de CORS:** quem já tem `backend/.env` de versões anteriores precisa copiar manualmente a linha `CORS_ORIGIN_REGEX` do `.env.example`. O regex antigo aceitava apenas Vite; sem a atualização, a janela Tauri recebe 403 (origens `tauri://localhost` e `http://tauri.localhost`). Nunca use `*` — a lista continua restrita a loopback e às origens exatas do WebView.
 
 ### Ferramentas de leitura (Etapa 2)
 
@@ -189,7 +191,7 @@ Ou, da raiz:
 ./scripts/check.sh
 ```
 
-O script roda `pytest`, `compileall` e `npm run build`.
+O script roda `pytest`, `compileall`, `npm test` (Vitest + Testing Library) e `npm run build`.
 
 ### Smoke real
 
@@ -227,7 +229,13 @@ O smoke falha se o backend ou o banco estiverem indisponíveis e, por padrão, e
 
 ## MVP Desktop (Tauri 2)
 
-O frontend também roda como aplicativo desktop residente: janela flutuante sem bordas, ícone na bandeja do sistema e menu **Abrir / Ocultar / Sair**. O backend Python **não** é necessário para esta camada — controles de conversa e microfone estão apenas visuais, preparados para a próxima etapa.
+O frontend também roda como aplicativo desktop residente: janela flutuante sem bordas, ícone na bandeja do sistema e menu **Abrir / Ocultar / Sair**. A janela agora conversa com o **mesmo backend FastAPI** do MVP web: ao abrir, consulta `/health` e `/history`; ao enviar, chama `/chat` e recarrega o histórico. O modelo e o backend continuam sendo iniciados manualmente (sem sidecar nesta etapa).
+
+São três terminais, nesta ordem:
+
+1. **Terminal 1 — llama-server:** o comando da seção 1 acima (`llama-server ... --port 8081`).
+2. **Terminal 2 — backend:** o comando da seção 2 acima (`uvicorn app.main:app --host 127.0.0.1 --port 8765`). Confira `http://127.0.0.1:8765/health`.
+3. **Terminal 3 — janela desktop:**
 
 ```bash
 cd frontend
@@ -236,7 +244,9 @@ npm run tauri:dev     # aplicativo com bandeja e janela nativa (Vite na porta 51
 npm run tauri:build   # gera .deb/AppImage em src-tauri/target/release/bundle/
 ```
 
-Para pré-visualizar só a interface no navegador, use `npm run dev`. Requisitos de compilação no Linux, limitações do AppIndicator/GNOME e detalhes de segurança estão em [docs/desktop-mvp.md](docs/desktop-mvp.md).
+Para pré-visualizar no navegador, use `npm run dev` (porta 5173) com o backend ligado. `VITE_API_BASE` é lido em tempo de build — configure-o antes de `npm run tauri:build` se o backend não estiver no endereço padrão. Se trocar a **porta**, acrescente também `http://127.0.0.1:<porta>` ao `connect-src` do CSP em `frontend/src-tauri/tauri.conf.json`; o CSP não usa curinga de porta.
+
+A janela usa `fetch` comum: o CSP do WebView libera `connect-src` apenas para `127.0.0.1:8765`/`localhost:8765`, e o CORS do FastAPI aceita somente loopback e as origens exatas do Tauri. Ao enviar, a pergunta aparece imediatamente na conversa e o campo é limpo; o histórico recarregado depois substitui a bolha provisória pela linha persistida. Sem o backend, o badge mostra `offline`, a bolha fica marcada como `não enviada` e o campo já foi limpo; com o `llama-server` parado, `/chat` responde 503 e a pergunta permanece no `/history`. Requisitos de compilação no Linux, limitações do AppIndicator/GNOME e detalhes de segurança estão em [docs/desktop-mvp.md](docs/desktop-mvp.md).
 
 ## Próximas etapas
 
@@ -244,5 +254,5 @@ Para pré-visualizar só a interface no navegador, use `npm run dev`. Requisitos
 2. Múltiplas conversas e busca no histórico.
 3. Push-to-talk, STT e TTS sob demanda.
 4. ~~Empacotamento com Tauri e mascote flutuante.~~ **Concluído** — ver MVP Desktop acima.
-5. Ligar os controles visuais ao backend FastAPI/llama.cpp sem reconstruir os componentes.
+5. ~~Ligar os controles visuais ao backend FastAPI/llama.cpp sem reconstruir os componentes.~~ **Concluído** — ver MVP Desktop acima.
 6. Integração com calendário/e-mail. Avaliar WhatsApp apenas por integração oficial.

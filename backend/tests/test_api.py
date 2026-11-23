@@ -40,6 +40,33 @@ def test_cors_allows_loopback_and_rejects_other_origins(client):
     assert denied.status_code == 400
 
 
+def test_cors_allows_tauri_webview_origins(client):
+    # Linux/macOS usam tauri://localhost; Windows usa http://tauri.localhost.
+    # Nenhuma outra origem pode ser liberada (ver teste loopback acima).
+    for origin in ("tauri://localhost", "http://tauri.localhost"):
+        response = client.options(
+            "/health",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_cors_rejects_lookalike_tauri_origins(client):
+    for origin in ("tauri://localhost.evil.com", "http://tauri.localhost.evil.com"):
+        response = client.options(
+            "/health",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 400
+
+
 def test_health_reports_database_and_model(client, fake_llm):
     fake_llm.models.data = [
         SimpleNamespace(id="outro-modelo", aliases=[]),
