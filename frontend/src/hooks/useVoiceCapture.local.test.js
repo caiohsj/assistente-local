@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ gate: null, instances: [] }));
+const state = vi.hoisted(() => ({ gate: null, instances: [], failFirst: false }));
 
 vi.mock("../services/localAudio.js", async (importOriginal) => {
   const actual = await importOriginal();
@@ -11,6 +11,10 @@ vi.mock("../services/localAudio.js", async (importOriginal) => {
     }
     async start() {
       if (state.gate) await state.gate;
+      if (state.failFirst && state.instances.length === 1) {
+        state.failFirst = false;
+        throw new Error("microfone ocupado");
+      }
       return this;
     }
     async stop() {
@@ -39,6 +43,7 @@ beforeEach(() => {
   resetSpeechRecognition(); // sem Web Speech API: caminho local
   vi.clearAllMocks();
   state.gate = null;
+  state.failFirst = false;
   state.instances.length = 0;
   isLocalCaptureSupported.mockReturnValue(true);
   transcribeAudio.mockResolvedValue({ text: "abra a luz" });
@@ -81,6 +86,19 @@ describe("useVoiceCapture com STT local", () => {
     });
     expect(result.current.status).toBe("error");
     expect(onError).toHaveBeenCalledWith("Falha ao transcrever o áudio.");
+  });
+
+  it("repeita getUserMedia após falha transitória ao trocar wake por captura", async () => {
+    state.failFirst = true;
+    const { result } = renderHook(() => useVoiceCapture({ enabled: true }));
+
+    let started;
+    await act(async () => {
+      started = await result.current.start();
+    });
+    expect(started).toBe(true);
+    expect(state.instances).toHaveLength(2);
+    expect(result.current.status).toBe("listening");
   });
 
   it("não cria um segundo gravador enquanto o primeiro espera o microfone", async () => {

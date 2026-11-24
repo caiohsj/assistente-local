@@ -14,8 +14,11 @@ vi.mock("../services/localAudio.js", async (importOriginal) => {
       if (state.gate) await state.gate;
       return this;
     }
-    async stop() {
+    drain() {
       return new Blob(["wav"], { type: "audio/wav" });
+    }
+    async stop() {
+      return this.drain();
     }
     async cancel() {}
   }
@@ -85,7 +88,9 @@ describe("useWakeWord com STT local", () => {
     });
 
     expect(result.current.status).toBe("listening");
-    expect(LocalAudioRecorder.instances).toHaveLength(2);
+    // Gravação contínua: o mesmo gravador serve para todas as janelas.
+    expect(LocalAudioRecorder.instances).toHaveLength(1);
+    expect(transcribeAudio).toHaveBeenCalledTimes(1);
   });
 
   it("rearma depois de pausar para a captura", async () => {

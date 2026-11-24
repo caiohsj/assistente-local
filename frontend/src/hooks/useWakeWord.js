@@ -15,6 +15,7 @@ import {
 const RESTART_DELAY_MS = 300;
 const COOLDOWN_MS = 2000;
 const LOCAL_WINDOW_MS = 3500;
+const DEBUG = import.meta.env.DEV && import.meta.env.MODE !== "test";
 
 /**
  * Escuta contínua da palavra de ativação ("Mestre").
@@ -71,7 +72,7 @@ export function useWakeWord({
 
   const clearLocalTimer = useCallback(() => {
     if (localTimerRef.current !== null) {
-      clearTimeout(localTimerRef.current);
+      clearInterval(localTimerRef.current);
       localTimerRef.current = null;
     }
   }, []);
@@ -178,18 +179,19 @@ export function useWakeWord({
     ) {
       return;
     }
-    localBusyRef.current = true;
     const recorder = localRecorderRef.current;
-    localRecorderRef.current = null;
+    // drain() NÃO encerra a gravação: o microfone fica aberto durante o STT.
+    const blob = recorder?.drain?.();
+    if (!blob) return;
+    localBusyRef.current = true;
     try {
-      const blob = await recorder?.stop();
-      if (!blob) return;
       const data = await transcribeAudio(blob);
       // A transcrição pode levar até 180 s: revalida antes de agir.
       if (!mountedRef.current || !enabledRef.current || stopRequestedRef.current) {
         return;
       }
-      const text = String(data?.text ?? "");
+      const text = String(data?.text ?? "").trim();
+      if (DEBUG && text) console.debug("[voz] wake ouviu:", text);
       const now = Date.now();
       if (
         containsWakeWord(text, configRef.current.wakeWord) &&
@@ -198,19 +200,20 @@ export function useWakeWord({
         lastWakeRef.current = now;
         stopRequestedRef.current = true;
         engineRef.current = null;
+        clearLocalTimer();
+        localRecorderRef.current = null;
+        void recorder.cancel();
         setStatus("paused");
+        if (DEBUG) console.debug("[voz] wake detectada, iniciando captura");
         callbacksRef.current.onWake?.();
-        return; // a captura vai chamar resume() quando terminar
       }
-    } catch {
+    } catch (error) {
+      if (DEBUG) console.warn("[voz] falha no STT da wake word:", error);
       // Falha transitória do STT: descarta a janela e tenta a próxima.
     } finally {
       localBusyRef.current = false;
     }
-    if (mountedRef.current && enabledRef.current && !stopRequestedRef.current) {
-      armLocalRef.current?.();
-    }
-  }, []);
+  }, [clearLocalTimer]);
   localWindowRef.current = runLocalWindow;
 
   const armLocal = useCallback(async () => {
@@ -248,8 +251,9 @@ export function useWakeWord({
       engineRef.current = "local";
       setStatus("listening");
       clearLocalTimer();
-      localTimerRef.current = setTimeout(() => {
-        localTimerRef.current = null;
+      // Intervalo fixo: transcreve janelas enquanto a gravação continua,
+      // sem deixar o microfone parado durante o STT.
+      localTimerRef.current = setInterval(() => {
         localWindowRef.current?.();
       }, LOCAL_WINDOW_MS);
     } finally {

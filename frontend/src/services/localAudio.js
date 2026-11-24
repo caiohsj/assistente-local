@@ -109,6 +109,20 @@ export class LocalAudioRecorder {
     }
   }
 
+  /**
+   * Devolve o áudio acumulado como WAV e esvazia o buffer SEM encerrar a
+   * gravação. Usado pela wake word: o microfone continua aberto enquanto a
+   * janela anterior é transcrita, evitando buracos entre janelas.
+   */
+  drain() {
+    if (!this.chunks.length) return null;
+    const chunks = this.chunks;
+    const samples = this.samples;
+    this.chunks = [];
+    this.samples = 0;
+    return encodeWav(chunks, this.context?.sampleRate || 16000);
+  }
+
   async stop() {
     this.recording = false;
     if (this.processor) {

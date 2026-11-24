@@ -26,13 +26,46 @@ export function normalizeText(text) {
     .trim();
 }
 
+function editDistance(a, b) {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      current[j] = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/** Aceita variações pequenas do ASR ("mestri", "mestres"). */
+function matchesToken(token, target) {
+  if (!token || !target) return false;
+  if (token === target) return true;
+  if (target.length < 4 || Math.abs(token.length - target.length) > 1) return false;
+  return editDistance(token, target) <= 1;
+}
+
 /** verdadeiro quando a frase contém a wake word como palavra inteira. */
 export function containsWakeWord(text, wakeWord = "mestre") {
   const needle = normalizeText(wakeWord);
   if (!needle) return false;
-  // Espaços nas bordas garantem palavra inteira e aceitam wake words de
-  // mais de uma palavra, como "ok mestre".
-  return ` ${normalizeText(text)} `.includes(` ${needle} `);
+  const words = normalizeText(text).split(" ").filter(Boolean);
+  const target = needle.split(" ");
+  if (target.length === 1) {
+    return words.some((word) => matchesToken(word, target[0]));
+  }
+  // Wake words de várias palavras precisam aparecer em sequência.
+  for (let index = 0; index <= words.length - target.length; index += 1) {
+    if (target.every((part, offset) => matchesToken(words[index + offset], part))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

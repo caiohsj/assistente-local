@@ -37,6 +37,13 @@ describe("speech", () => {
     expect(containsWakeWord("algo", "")).toBe(false);
   });
 
+  it("aceita variações pequenas do reconhecedor de voz", () => {
+    expect(containsWakeWord("mestri, abra", "mestre")).toBe(true);
+    expect(containsWakeWord("oi mestres", "mestre")).toBe(true);
+    expect(containsWakeWord("ok meistre", "ok mestre")).toBe(true);
+    expect(containsWakeWord("palavra diferente", "mestre")).toBe(false);
+  });
+
   it("traduz erros comuns para mensagens em português", () => {
     expect(speechErrorMessage({ error: "not-allowed" })).toMatch(/Permissão/);
     expect(speechErrorMessage({ error: "network" })).toMatch(/indisponível/);

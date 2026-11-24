@@ -222,12 +222,22 @@ export function useVoiceCapture({
       }
 
       if (isLocalCaptureSupported()) {
-        const recorder = new LocalAudioRecorder();
+        let recorder = null;
         try {
           // Refs atribuídas antes do await: a trava cobre a janela de permissão.
+          recorder = new LocalAudioRecorder();
           localRecorderRef.current = recorder;
           engineRef.current = "local";
-          await recorder.start();
+          try {
+            await recorder.start();
+          } catch {
+            // Logo após a wake word o WebKitGTK pode recusar um segundo
+            // getUserMedia enquanto o stream anterior ainda é liberado.
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            recorder = new LocalAudioRecorder();
+            localRecorderRef.current = recorder;
+            await recorder.start();
+          }
           if (!configRef.current.enabled) {
             void recorder.cancel();
             localRecorderRef.current = null;
@@ -238,7 +248,7 @@ export function useVoiceCapture({
         } catch {
           localRecorderRef.current = null;
           engineRef.current = null;
-          void recorder.cancel();
+          if (recorder) void recorder.cancel();
           setStatus("error");
           callbacksRef.current.onError?.(
             "Não foi possível acessar o microfone. Verifique a permissão do aplicativo."

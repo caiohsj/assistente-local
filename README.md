@@ -215,7 +215,7 @@ No Linux o Rust habilita `enable-media-stream` no WebKitGTK e responde ao pedido
 
 > Na primeira transcrição local o modelo é baixado do HuggingFace (o `tiny` tem ~75 MB) e carregado em memória. A primeira chamada pode demorar alguns segundos; depois fica rápido. O `faster-whisper` já faz parte de `backend/requirements.txt`.
 
-**Limitações importantes:** no modo wake word com STT local o áudio é processado em janelas de ~3,5 s (consumo de CPU maior e latência de até esse valor). Reconhecimento contínuo em janela oculta pode ser suspenso pelo sistema — o modo wake word é mais confiável com a janela visível. A precisão depende do modelo escolhido (`tiny` prioriza velocidade).
+**Limitações importantes:** no modo wake word com STT local o microfone fica aberto continuamente e o áudio é transcrito em janelas de ~3,5 s (consumo de CPU maior e latência de até esse valor). A gravação **não para** durante a transcrição, mas atrasos do modelo podem atrasar o reconhecimento da palavra. Reconhecimento contínuo em janela oculta pode ser suspenso pelo sistema — o modo wake word é mais confiável com a janela visível. A precisão depende do modelo (`tiny` prioriza velocidade); variações como "mestri" também são aceitas. Em builds de desenvolvimento, o console mostra o que o STT ouviu (`[voz] wake ouviu: ...`), útil para calibrar o modelo.
 
 ### Endpoints
 

@@ -164,7 +164,9 @@ export default function AssistantWindow() {
       ? "listening"
       : capture.status === "transcribing"
         ? "transcribing"
-        : connection === "offline"
+        : wake.status === "listening"
+          ? "wake"
+          : connection === "offline"
         ? "offline"
         : error
           ? "error"
