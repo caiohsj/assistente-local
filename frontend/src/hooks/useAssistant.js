@@ -22,6 +22,7 @@ export function useAssistant() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
   const [lastToolCalls, setLastToolCalls] = useState([]);
+  const [voice, setVoice] = useState(null);
 
   const mounted = useRef(true);
   const inflight = useRef(null);
@@ -58,6 +59,7 @@ export function useAssistant() {
       if (connectionGen !== connectionGeneration.current) return;
       if (health.status === "fulfilled") {
         setConnection("online");
+        setVoice(health.value?.voice ?? null);
       } else {
         setConnection("offline");
         setError("Backend local indisponível.");
@@ -169,6 +171,7 @@ export function useAssistant() {
     sending,
     error,
     lastToolCalls,
+    voice,
     sendMessage,
     clearError,
   };

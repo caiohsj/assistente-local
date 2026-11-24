@@ -22,7 +22,7 @@ export default function AssistantHeader({ state = "active", connection = "checki
       <div className="assistant-header__brand">
         <span className="assistant-header__mark" aria-hidden="true">✦</span>
         <span className="assistant-header__titles">
-          <strong>Assistente Local</strong>
+          <strong>Mestre</strong>
           <small>seu espaço pessoal</small>
         </span>
       </div>

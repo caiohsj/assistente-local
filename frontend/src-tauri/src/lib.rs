@@ -4,19 +4,26 @@
 //!   - manter o ícone na bandeja do sistema e seu menu de contexto;
 //!   - controlar visibilidade/foco/posição da janela flutuante;
 //!   - impedir que o botão de fechar encerre o processo;
-//!   - garantir uma única instância do aplicativo.
+//!   - garantir uma única instância do aplicativo;
+//!   - registrar o atalho global que abre o Mestre pedindo captura de voz.
 //!
 //! Nenhuma funcionalidade de IA, áudio, rede ou sistema de arquivos é exposta aqui.
+//! O áudio permanece no WebView (Web Speech API); o Rust apenas sinaliza o pedido.
 
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, PhysicalPosition, WebviewWindow, WindowEvent,
+    AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow, WindowEvent,
 };
+use tauri_plugin_global_shortcut::ShortcutState;
+
+mod linux_media;
 
 const WINDOW_LABEL: &str = "main";
-const TRAY_ID: &str = "assistente-local-tray";
+const TRAY_ID: &str = "mestre-tray";
+const VOICE_REQUEST_EVENT: &str = "mestre://voice-request";
+const VOICE_SHORTCUT: &str = "CommandOrControl+Shift+M";
 const MARGIN_LOGICAL_PX: f64 = 24.0;
 
 fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
@@ -52,6 +59,15 @@ fn show_window(window: &WebviewWindow) {
     position_near_bottom_right(window);
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+/// Abre a janela e sinaliza ao frontend para iniciar a captura de voz.
+/// O frontend decide se o recurso está habilitado (env + /health) e qual o modo.
+fn request_voice_capture(app: &AppHandle) {
+    if let Some(window) = main_window(app) {
+        show_window(&window);
+    }
+    let _ = app.emit(VOICE_REQUEST_EVENT, ());
 }
 
 fn toggle_window(app: &AppHandle) {
@@ -113,6 +129,19 @@ fn app_quit(app: AppHandle) {
 
 pub fn run() {
     tauri::Builder::default()
+        // Atalho global: abre o Mestre já pedindo captura de voz. Registrado
+        // sempre; o frontend é quem aplica a válvula da variável de ambiente.
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcut(VOICE_SHORTCUT)
+                .expect("atalho global inválido")
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        request_voice_capture(&app);
+                    }
+                })
+                .build(),
+        )
         // Se um segundo processo for iniciado, ele apenas traz a janela
         // existente para frente e encerra, sem criar uma segunda instância.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -132,6 +161,8 @@ pub fn run() {
             let window = app
                 .get_webview_window(WINDOW_LABEL)
                 .expect("a janela 'main' precisa existir no tauri.conf.json");
+            #[cfg(target_os = "linux")]
+            linux_media::enable_media_capture(&window);
             position_near_bottom_right(&window);
 
             // Alguns gerenciadores de janela (GNOME/Mutter, por exemplo)
@@ -149,23 +180,25 @@ pub fn run() {
             });
 
             // No Linux, o trayIcon pode não aparecer sem um menu associado.
-            let open = MenuItem::with_id(app, "open", "Abrir assistente", true, None::<&str>)?;
-            let hide = MenuItem::with_id(app, "hide", "Ocultar assistente", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Abrir Mestre", true, None::<&str>)?;
+            let voice = MenuItem::with_id(app, "voice", "Falar com Mestre", true, None::<&str>)?;
+            let hide = MenuItem::with_id(app, "hide", "Ocultar Mestre", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Sair do aplicativo", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &hide, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &voice, &hide, &quit])?;
 
             let icon = Image::from_bytes(include_bytes!("../icons/icon.png"))?;
 
             let tray = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(icon)
                 .menu(&menu)
-                .tooltip("Assistente Local")
+                .tooltip("Mestre")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => {
                         if let Some(window) = main_window(app) {
                             show_window(&window);
                         }
                     }
+                    "voice" => request_voice_capture(app),
                     "hide" => {
                         if let Some(window) = main_window(app) {
                             let _ = window.hide();
@@ -205,5 +238,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("falha ao iniciar o Assistente Local");
+        .expect("falha ao iniciar o Mestre");
 }

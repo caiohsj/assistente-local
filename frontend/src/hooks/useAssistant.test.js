@@ -53,6 +53,22 @@ describe("useAssistant", () => {
     expect(fetchHistory).toHaveBeenCalledWith(100);
   });
 
+  it("expõe a configuração de voz anunciada pelo health", async () => {
+    fetchHealth.mockResolvedValueOnce({
+      backend: "ok",
+      voice: { enabled: true, wake_word: "mestre", language: "pt-BR" },
+    });
+
+    const { result } = renderHook(() => useAssistant());
+    await waitFor(() =>
+      expect(result.current.voice).toEqual({
+        enabled: true,
+        wake_word: "mestre",
+        language: "pt-BR",
+      })
+    );
+  });
+
   it("carrega histórico mesmo quando o health falha", async () => {
     fetchHealth.mockRejectedValue(new Error("backend fora"));
     fetchHistory.mockResolvedValueOnce({ messages: [userMessage] });

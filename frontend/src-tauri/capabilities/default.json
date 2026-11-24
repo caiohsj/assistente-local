@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Nenhuma API nativa é concedida ao frontend. Toda a interação com a janela passa por comandos próprios definidos em lib.rs.",
+  "description": "Apenas escuta de eventos do Rust e comandos próprios definidos em lib.rs. Nenhuma API nativa adicional é concedida ao frontend.",
   "windows": ["main"],
-  "permissions": []
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }

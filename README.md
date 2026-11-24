@@ -1,8 +1,8 @@
-# Assistente Local — MVP 0.4
+# Mestre — MVP 0.4
 
 Base local-first: FastAPI + llama.cpp + SQLite + React/Vite.
 
-Esta versão entrega conversa local com histórico persistente, ferramentas de **leitura** (arquivos e sistema) sob allowlist e **abertura de aplicativos e sites**. Não executa comandos com argumentos, não escreve arquivos, não acessa WhatsApp/e-mail e não mantém microfone ativo.
+Esta versão entrega conversa local com histórico persistente, ferramentas de **leitura** (arquivos e sistema) sob allowlist, **abertura de aplicativos e sites** e **captura por voz opcional** (ativada por variável de ambiente, incluindo atalho global e wake word "Mestre"). Não executa comandos com argumentos, não escreve arquivos, não acessa WhatsApp/e-mail. O microfone só fica ativo se você habilitar a voz — e, no modo wake word, permanece em escuta contínua enquanto o app estiver aberto.
 
 ## Requisitos
 
@@ -163,13 +163,68 @@ Regras:
 
 As válvulas de segurança são `TOOL_OPEN_APP_DENY` (bloqueia executáveis específicos) e `TOOL_OPEN_URL_DOMAINS` (restringe sites). Sem argumentos, o risco de comando destrutivo é baixo, mas executáveis com efeito imediato continuam possíveis.
 
+### Captura por voz (Etapa 4)
+
+O assistente se chama **Mestre**. A voz é **desligada por padrão** e exige as duas válvulas abaixo — se só uma estiver ligada, o microfone permanece desabilitado e o modo texto continua funcionando.
+
+| Chave | Onde | Default | Observação |
+|---|---|---|---|
+| `VOICE_ENABLED` | `backend/.env` | `false` | Publica `voice` em `/health` |
+| `VOICE_WAKE_WORD` | `backend/.env` | `mestre` | Palavra de ativação do modo wake word |
+| `VOICE_LANGUAGE` | `backend/.env` | `pt-BR` | Idioma da transcrição (BCP 47) |
+| `VOICE_STT_MODEL` | `backend/.env` | `tiny` | Modelo faster-whisper (`tiny`, `base`, `small`…) |
+| `VOICE_STT_DEVICE` | `backend/.env` | `cpu` | `cpu` ou `cuda` |
+| `VOICE_STT_COMPUTE_TYPE` | `backend/.env` | `int8` | Precisão do CTranslate2 |
+| `VOICE_STT_LANGUAGE` | `backend/.env` | `pt` | Idioma do Whisper (`pt`, `en`, `auto`) |
+| `VOICE_MAX_AUDIO_BYTES` | `backend/.env` | `10485760` | Limite do corpo em `/transcribe` |
+| `VITE_VOICE_ENABLED` | `frontend/.env` | `false` | Lido no build do Vite (também vale para `tauri:build`) |
+| `VITE_VOICE_LANGUAGE` | `frontend/.env` | `pt-BR` | Usado apenas se o backend não informar `VOICE_LANGUAGE` |
+
+```bash
+# backend/.env
+VOICE_ENABLED=true
+VOICE_WAKE_WORD=mestre
+VOICE_LANGUAGE=pt-BR
+
+# STT local — usado no app desktop (Tauri/WebKitGTK não tem Web Speech API)
+VOICE_STT_MODEL=tiny
+VOICE_STT_DEVICE=cpu
+VOICE_STT_COMPUTE_TYPE=int8
+VOICE_STT_LANGUAGE=pt
+```
+
+```bash
+# frontend/.env
+VITE_VOICE_ENABLED=true
+VITE_VOICE_LANGUAGE=pt-BR
+```
+
+Dois modos, selecionáveis na interface (a escolha vale pela sessão; ao reiniciar o app, o modo volta para **Atalho** — decisão de privacidade para não reabrir o microfone sem reconfirmação):
+
+- **Atalho** (padrão): `Ctrl+Shift+M` (ou `Cmd+Shift+M`) abre a janela e já inicia a captura. O item **Falar com Mestre** no menu da bandeja faz o mesmo.
+- **Dizer "mestre"**: escuta contínua; ao reconhecer a palavra, a janela abre e a captura começa. O texto da wake word **não** é enviado ao chat.
+
+O botão do microfone no campo de mensagem também inicia/para a captura manualmente. O resultado final da transcrição é enviado como uma mensagem normal (`/chat`).
+
+**Dois motores de transcrição, escolhidos automaticamente:**
+
+1. **Web Speech API** — usada no navegador (Chrome/Chromium). A transcrição acontece no provedor do navegador e pode usar rede.
+2. **STT local (padrão no desktop)** — o WebView WebKitGTK do Tauri no Linux não implementa `SpeechRecognition`. Nesses casos o app grava áudio com Web Audio e envia um WAV curto para `POST /transcribe`, onde o **faster-whisper** transcreve localmente. Nenhum áudio sai da máquina nesse caminho.
+
+No Linux o Rust habilita `enable-media-stream` no WebKitGTK e responde ao pedido de permissão de microfone **somente para as origens do próprio app** (`tauri://localhost`, `http://tauri.localhost` e a origem Vite de dev). Outros tipos de permissão continuam com o tratamento padrão.
+
+> Na primeira transcrição local o modelo é baixado do HuggingFace (o `tiny` tem ~75 MB) e carregado em memória. A primeira chamada pode demorar alguns segundos; depois fica rápido. O `faster-whisper` já faz parte de `backend/requirements.txt`.
+
+**Limitações importantes:** no modo wake word com STT local o áudio é processado em janelas de ~3,5 s (consumo de CPU maior e latência de até esse valor). Reconhecimento contínuo em janela oculta pode ser suspenso pelo sistema — o modo wake word é mais confiável com a janela visível. A precisão depende do modelo escolhido (`tiny` prioriza velocidade).
+
 ### Endpoints
 
 | Método | Rota | Uso |
 |---|---|---|
-| `GET` | `/health` | Backend, banco, modelo e famílias de ferramentas (`files`, `system`, `apps`) |
+| `GET` | `/health` | Backend, banco, modelo, famílias de ferramentas (`files`, `system`, `apps`) e configuração de voz |
 | `GET` | `/history?limit=100` | Histórico (1–500, inclui linhas de erro) |
 | `POST` | `/chat` | Conversa com loop de ferramentas |
+| `POST` | `/transcribe` | Áudio bruto (WAV) → `{ "text": "..." }` via faster-whisper |
 | `GET` | `/tools` | Matriz de habilitação, raízes, aliases, denylist, domínios e caps |
 | `POST` | `/tools/{name}` | Execução direta para depuração |
 
@@ -216,6 +271,14 @@ O smoke falha se o backend ou o banco estiverem indisponíveis e, por padrão, e
 8. Peça um nome com caminho (`/usr/bin/firefox`) ou uma URL `file:///etc/passwd`: a ferramenta deve recusar.
 9. Se `TOOL_OPEN_URL_DOMAINS` estiver preenchido, peça um domínio fora da lista: a ferramenta deve recusar com `forbidden_target`.
 10. Confira em `tool_calls` que a URL foi gravada apenas como `scheme://host`, sem query string nem fragmento.
+11. Com voz desabilitada, confira que o microfone está cinza e que digitar continua funcionando.
+12. Com as duas variáveis ligadas, clique no microfone, fale e confirme que a transcrição vira mensagem no `/history`.
+13. Pressione `Ctrl+Shift+M`: a janela abre e a captura começa; repita no menu da bandeja (**Falar com Mestre**).
+14. Selecione **dizer "mestre"**, chame por Mestre e confirme que a janela abre ouvindo sem enviar a palavra de ativação ao chat.
+15. Negue a permissão de microfone: a UI mostra a mensagem de erro e o modo texto continua disponível.
+16. No modo wake word, chame "Mestre" duas vezes seguidas: a escuta deve rearmar após a primeira captura (só um reconhecedor ativo por vez).
+17. Reinicie o app: o modo deve voltar para **Atalho**, sem reabrir o microfone automaticamente.
+18. No desktop, confirme em `/health` que `voice.stt_available` é `true`; na primeira captura o modelo `tiny` é baixado e o status mostra **Transcrevendo…**.
 
 ## Limitações atuais
 
@@ -226,6 +289,8 @@ O smoke falha se o backend ou o banco estiverem indisponíveis e, por padrão, e
 - Allowlist é global e definida no `.env`.
 - Sem autenticação: o backend e a UI escutam somente em `127.0.0.1`. Não exponha essas portas na rede.
 - GPU NVIDIA é opcional; a ausência de `nvidia-smi` não quebra a ferramenta de sistema.
+- No desktop (Tauri/Linux) a transcrição usa o modelo local `tiny`; áudio trafega apenas entre o WebView e o backend, em loopback. No navegador, a Web Speech API pode usar o provedor do navegador.
+- O modo wake word mantém o reconhecedor contínuo remontando enquanto estiver selecionado — isso consome recursos e pode ser suspenso em janela oculta.
 
 ## MVP Desktop (Tauri 2)
 
@@ -252,7 +317,7 @@ A janela usa `fetch` comum: o CSP do WebView libera `connect-src` apenas para `1
 
 1. Memória de longo prazo com fatos aprovados e busca SQLite FTS5.
 2. Múltiplas conversas e busca no histórico.
-3. Push-to-talk, STT e TTS sob demanda.
+3. ~~Captura por voz (STT) com atalho global e wake word.~~ **Concluído** — ver seção de voz acima. Restam push-to-talk e TTS sob demanda.
 4. ~~Empacotamento com Tauri e mascote flutuante.~~ **Concluído** — ver MVP Desktop acima.
 5. ~~Ligar os controles visuais ao backend FastAPI/llama.cpp sem reconstruir os componentes.~~ **Concluído** — ver MVP Desktop acima.
 6. Integração com calendário/e-mail. Avaliar WhatsApp apenas por integração oficial.

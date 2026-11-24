@@ -1,4 +1,4 @@
-# Como foi feito — Assistente Local MVP 0.3
+# Como foi feito — Mestre MVP 0.3
 
 > Documento técnico e didático sobre a implementação das Etapas 1, 2 e 3.
 > Serve como base para explicar o projeto em vídeo, em uma apresentação ou para outra pessoa que vá continuar o código.

@@ -26,7 +26,7 @@ def request(base: str, path: str, payload: dict | None = None, timeout: float = 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Smoke test do Assistente Local")
+    parser = argparse.ArgumentParser(description="Smoke test do Mestre")
     parser.add_argument("--base", default="http://127.0.0.1:8765")
     parser.add_argument("--skip-chat", action="store_true")
     parser.add_argument("--timeout", type=float, default=200.0)

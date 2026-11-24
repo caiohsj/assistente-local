@@ -1,8 +1,17 @@
 import { MESSAGE_MAX_LENGTH } from "../../services/api.js";
 
+const MIC_LABELS = {
+  idle: "Iniciar captura de voz",
+  listening: "Parar captura de voz",
+  transcribing: "Transcrevendo áudio…",
+  unsupported: "Microfone não suportado neste navegador",
+  error: "Microfone com erro — toque para tentar de novo",
+};
+
 /**
- * Campo de texto e botão de envio ativos. O microfone permanece apenas visual:
- * captura de voz (STT) está fora do escopo desta etapa.
+ * Campo de texto, botão de envio e controles de voz. O microfone só aparece
+ * como ativo quando a variável de ambiente habilita o recurso no frontend e
+ * no backend; fora isso ele permanece desabilitado (modo texto intacto).
  */
 export default function AssistantControls({
   value = "",
@@ -12,8 +21,16 @@ export default function AssistantControls({
   error,
   onClearError,
   onClearInput,
+  voiceEnabled = false,
+  voiceStatus = "idle",
+  voiceError = null,
+  voiceMode = "shortcut",
+  wakeWord = "mestre",
+  onVoiceModeChange,
+  onVoiceToggle,
 }) {
   const canSend = Boolean(value.trim()) && !sending;
+  const micDisabled = !voiceEnabled || sending || voiceStatus === "transcribing";
 
   async function submit() {
     if (!canSend) return;
@@ -46,6 +63,16 @@ export default function AssistantControls({
     if (error) onClearError?.();
   }
 
+  const hint = error
+    ? error
+    : voiceError
+      ? voiceError
+      : voiceStatus === "listening"
+        ? "Ouvindo… fale sua mensagem"
+        : voiceStatus === "transcribing"
+          ? "Transcrevendo sua fala…"
+          : "Enter envia · Shift+Enter quebra linha";
+
   return (
     <div className="assistant-controls">
       <form
@@ -66,12 +93,21 @@ export default function AssistantControls({
         />
         <button
           type="button"
-          className="assistant-controls__mic"
-          disabled
-          title="Captura de voz em breve"
-          aria-label="Microfone (em breve)"
+          className={`assistant-controls__mic${voiceStatus === "listening" ? " assistant-controls__mic--listening" : ""}${voiceStatus === "transcribing" ? " assistant-controls__mic--busy" : ""}`}
+          disabled={micDisabled}
+          onClick={onVoiceToggle}
+          title={
+            voiceEnabled
+              ? MIC_LABELS[voiceStatus] ?? MIC_LABELS.idle
+              : "Captura de voz desabilitada (VOICE_ENABLED / VITE_VOICE_ENABLED)"
+          }
+          aria-label={
+            voiceEnabled
+              ? MIC_LABELS[voiceStatus] ?? MIC_LABELS.idle
+              : "Microfone desabilitado"
+          }
         >
-          <span aria-hidden="true">✦</span>
+          <span aria-hidden="true">{voiceStatus === "listening" ? "■" : "✦"}</span>
         </button>
         <button
           type="submit"
@@ -83,11 +119,36 @@ export default function AssistantControls({
           <span aria-hidden="true">↑</span>
         </button>
       </form>
+
+      {voiceEnabled && (
+        <div
+          className="assistant-controls__voice-modes"
+          role="group"
+          aria-label="Modo de ativação por voz"
+        >
+          <span>Ativar</span>
+          <button
+            type="button"
+            aria-pressed={voiceMode === "shortcut"}
+            onClick={() => onVoiceModeChange?.("shortcut")}
+          >
+            atalho
+          </button>
+          <button
+            type="button"
+            aria-pressed={voiceMode === "wake"}
+            onClick={() => onVoiceModeChange?.("wake")}
+          >
+            dizer “{wakeWord}”
+          </button>
+        </div>
+      )}
+
       <p
-        className={`assistant-controls__hint${error ? " assistant-controls__hint--error" : ""}`}
-        role={error ? "alert" : undefined}
+        className={`assistant-controls__hint${error || voiceError ? " assistant-controls__hint--error" : ""}`}
+        role={error || voiceError ? "alert" : undefined}
       >
-        {error || "Enter envia · Shift+Enter quebra linha"}
+        {hint}
       </p>
     </div>
   );

@@ -48,6 +48,20 @@ class Settings(BaseSettings):
     )
     tool_open_app_deny: str = ""
 
+    # Voz (captura via Web Speech API no frontend). O backend apenas anuncia a
+    # disponibilidade e os parâmetros; nenhum áudio trafega por aqui nesta etapa.
+    voice_enabled: bool = False
+    voice_wake_word: str = "mestre"
+    voice_language: str = "pt-BR"
+
+    # STT local (faster-whisper), usado quando a Web Speech API não existe
+    # (WebView WebKitGTK do Tauri no Linux). Modelo baixado no primeiro uso.
+    voice_stt_model: str = "tiny"
+    voice_stt_device: str = "cpu"
+    voice_stt_compute_type: str = "int8"
+    voice_stt_language: str = "pt"
+    voice_max_audio_bytes: int = 10_485_760
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

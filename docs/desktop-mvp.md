@@ -1,11 +1,11 @@
-# MVP Desktop — Assistente Local
+# MVP Desktop — Mestre
 
-Janela flutuante residente com ícone na bandeja do sistema, construída com **Tauri 2 + React + Vite** e ligada ao backend Python/FastAPI já existente. A conversa acontece na janela desktop sem reconstruir a interface e sem substituir o Python; áudio (STT/TTS) continua fora do escopo.
+Janela flutuante residente com ícone na bandeja do sistema, construída com **Tauri 2 + React + Vite** e ligada ao backend Python/FastAPI já existente. A conversa acontece na janela desktop sem reconstruir a interface e sem substituir o Python. A captura de voz (STT) é opcional: no WebView WebKitGTK do Linux usa gravação local + faster-whisper no backend; síntese de voz (TTS) continua fora do escopo.
 
 ## O que este MVP faz
 
 - Inicia com uma janela sem bordas, escura, translúcida e sempre no topo, posicionada no canto inferior direito da área útil do monitor.
-- Mantém um ícone na bandeja do sistema com o menu **Abrir assistente / Ocultar assistente / Sair do aplicativo**.
+- Mantém um ícone na bandeja do sistema com o menu **Abrir Mestre / Falar com Mestre / Ocultar Mestre / Sair do aplicativo**.
 - O botão `×` da janela **oculta** a janela; o processo permanece residente. O encerramento real só acontece em **Sair**.
 - Impede uma segunda instância: abrir o aplicativo novamente traz a janela existente para frente.
 - A janela pode ser arrastada pelo cabeçalho e redimensionada entre 340×460 e 760×900 px.
@@ -15,7 +15,7 @@ Janela flutuante residente com ícone na bandeja do sistema, construída com **T
 - Com o histórico vazio, mantém o palco original (mascote + status); com mensagens, mostra a conversa rolável com o mascote reduzido.
 - Sem backend, mostra `offline` e o erro sem descartar o texto digitado; com `llama-server` parado, o 503 limpa o campo porque a pergunta foi salva.
 
-Fora do escopo desta etapa: STT/TTS e microfone ativo, sidecar/autostart do backend, streaming de tokens, múltiplas conversas, autenticação, exposição da porta em rede e notificações.
+Fora do escopo desta etapa: TTS, sidecar/autostart do backend, streaming de tokens, múltiplas conversas, autenticação, exposição da porta em rede e notificações. A voz é opcional (`VOICE_ENABLED` + `VITE_VOICE_ENABLED`); no desktop usa `faster-whisper` via `POST /transcribe`. Detalhes no README.
 
 ## Estrutura adicionada
 
@@ -26,21 +26,26 @@ frontend/
 │   │   ├── AssistantWindow.jsx   # composição da janela, palco e conversa
 │   │   ├── AssistantHeader.jsx   # nome, estado visual, conexão e botões da janela
 │   │   ├── AssistantMascot.jsx   # mascote SVG original (idle/hover/active)
-│   │   ├── AssistantStatus.jsx   # idle/active/hover + connecting/online/offline/thinking/error
+│   │   ├── AssistantStatus.jsx   # idle/active/hover + connecting/online/offline/thinking/transcribing/listening/error
 │   │   ├── AssistantConversation.jsx # lista rolável, erros e chips de ferramentas
-│   │   └── AssistantControls.jsx # campo ativo, envio, microfone apenas visual
+│   │   └── AssistantControls.jsx # campo, envio, microfone e modos de voz
 │   ├── hooks/
 │   │   ├── useWindowControls.js  # invoke() dos comandos nativos
-│   │   └── useAssistant.js       # mensagens, conexão, envio, aborts e tool_calls
+│   │   ├── useAssistant.js       # mensagens, conexão, envio, aborts, tool_calls e config de voz
+│   │   ├── useVoiceCapture.js    # captura (Web Speech API ou WAV → /transcribe)
+│   │   └── useWakeWord.js        # escuta contínua da palavra "Mestre"
 │   ├── services/api.js           # cliente FastAPI (fetch comum + timeout + ApiError)
+│   ├── services/speech.js        # wrapper/feature detection da Web Speech API
+│   ├── services/localAudio.js    # gravação Web Audio → WAV para STT local
 │   ├── styles/assistant.css      # identidade visual glassmorphism + conversa
 │   ├── test/setup.js             # matchers do Testing Library para Vitest
 │   ├── App.jsx
 │   └── main.jsx
 └── src-tauri/
-    ├── src/lib.rs                # tray, janela, close→hide, single-instance, comandos
+    ├── src/lib.rs                # tray, janela, close→hide, single-instance, comandos, atalho
+    ├── src/linux_media.rs        # habilita getUserMedia no WebKitGTK (origens confiáveis)
     ├── src/main.rs
-    ├── capabilities/default.json # nenhuma permissão de API nativa concedida
+    ├── capabilities/default.json # só listen/unlisten de eventos; nenhuma outra API nativa
     ├── tauri.conf.json           # janela, build e empacotamento
     ├── icons/                    # ícones gerados pelo CLI a partir de icon.svg
     └── Cargo.toml
@@ -106,13 +111,13 @@ Os artefatos ficam em `frontend/src-tauri/target/release/bundle/` — neste ambi
 - Toda ação sensível passa por comandos próprios em `lib.rs` (`window_show`, `window_hide`, `window_toggle`, `window_start_dragging`, `window_set_always_on_top`, `app_quit`) — o frontend apenas os solicita pelo nome.
 - A janela **não abre portas**: ela apenas faz `fetch` de saída para o FastAPI em loopback (`127.0.0.1:8765` por padrão). Não há plugin HTTP do Tauri; o mesmo `services/api.js` funciona no WebView e no navegador.
 - O CSP em `tauri.conf.json` restringe `connect-src` a `'self'`, `http://127.0.0.1:8765` e `http://localhost:8765`. O CORS do FastAPI (`CORS_ORIGIN_REGEX`) aceita somente loopback e as origens exatas `tauri://localhost` / `http://tauri.localhost`. Nunca use `*`; quem já tem `.env` antigo precisa atualizar a linha manualmente.
-- Nenhuma API nativa de filesystem, shell, diálogo, HTTP ou notificação está habilitada.
+- Nenhuma API nativa de filesystem, shell, diálogo, HTTP ou notificação está habilitada. A única permissão concedida é `core:event:default`, usada para receber o pedido de captura de voz do atalho global; o atalho é registrado no Rust via `tauri-plugin-global-shortcut`.
 - `npm audit --omit=dev` reporta **0 vulnerabilidades** em produção. Os avisos restantes são de dependências de desenvolvimento (esbuild/vite) e afetam apenas o servidor local de dev; nunca exponha a porta 5180 na rede.
 - `skipTaskbar` está `false` para que a janela continue acessível via dock/Alt+Tab mesmo em ambientes sem bandeja. Mude para `true` em `tauri.conf.json` se o alvo tiver AppIndicator garantido.
 
 ## Limitações conhecidas do Linux / GNOME
 
-1. **Clique no ícone da bandeja.** O Tauri 2 não emite `TrayIconEvent::Click` no Linux: o backend é AppIndicator (StatusNotifierItem), que entrega apenas o menu de contexto. O handler de clique existe em `lib.rs` e funciona em Windows/macOS; **no Linux, use o menu** (Abrir/Ocultar/Sair). Esta é a alternativa compatível recomendada pela limitação da plataforma.
+1. **Clique no ícone da bandeja.** O Tauri 2 não emite `TrayIconEvent::Click` no Linux: o backend é AppIndicator (StatusNotifierItem), que entrega apenas o menu de contexto. O handler de clique existe em `lib.rs` e funciona em Windows/macOS; **no Linux, use o menu** (Abrir/Falar/Ocultar/Sair). Esta é a alternativa compatível recomendada pela limitação da plataforma.
 2. **Extensão do shell.** Sem `ubuntu-appindicators` (GNOME) ou um painel compatível (COSMIC), o ícone pode não aparecer. A janela continua acessível pela dock porque `skipTaskbar: false`.
 3. **Transparência.** `transparent: true` depende do WebKitGTK 4.1 e do compositor. Em X11/Mutter o glassmorphism é aplicado; em sessions Wayland sem compositor compatível, o fundo pode aparecer opaco. O conteúdo foi desenhado para continuar legível nesse caso.
 4. **Sempre no topo.** `alwaysOnTop: true` depende do gerenciador de janelas. Alguns WMs honram apenas a intenção, outros ignoram. O comando `window_set_always_on_top` já está disponível para controle futuro.
@@ -128,7 +133,7 @@ Os artefatos ficam em `frontend/src-tauri/target/release/bundle/` — neste ambi
 | 3 | Clique no ícone abre a janela | No Linux o AppIndicator entrega apenas o menu; itens testados via DBusMenu. Clique direto funciona em Windows/macOS |
 | 4 | Janela arrastável | `onMouseDown` no cabeçalho chama o comando próprio `window_start_dragging` (sem exigir permissão de plugin) |
 | 5 | Ocultar sem encerrar | `CloseRequested → prevent_close() → hide()` |
-| 6 | Reabrir pela bandeja | Item `Abrir assistente` do menu |
+| 6 | Reabrir pela bandeja | Item `Abrir Mestre` do menu |
 | 7 | Menu permite sair | Item `Sair do aplicativo` → `app.exit(0)` |
 | 8 | Sem instâncias duplicadas | Plugin `tauri-plugin-single-instance` |
 | 9 | Conversa na janela com backend ligado | `/health` + `/history` na abertura; `/chat` no envio, com histórico recarregado sem duplicatas |

@@ -35,7 +35,10 @@ async function parseJson(response) {
   }
 }
 
-async function request(path, { method = "GET", body, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+async function request(
+  path,
+  { method = "GET", body, raw = false, contentType, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}
+) {
   const controller = new AbortController();
   const forwardAbort = () => controller.abort(signal.reason);
   if (signal) {
@@ -53,8 +56,11 @@ async function request(path, { method = "GET", body, signal, timeoutMs = DEFAULT
   try {
     response = await fetch(`${API}${path}`, {
       method,
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers:
+        body === undefined
+          ? undefined
+          : { "Content-Type": raw ? contentType || "application/octet-stream" : "application/json" },
+      body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
       signal: controller.signal,
     });
   } catch (error) {
@@ -89,4 +95,17 @@ export function fetchHistory(limit = 100, options = {}) {
 /** POST /chat → { reply, model, tool_calls: [...] } */
 export function sendChatMessage(message, options = {}) {
   return request("/chat", { ...options, method: "POST", body: { message } });
+}
+
+/** POST /transcribe → { text }. Corpo bruto (WAV), não JSON. */
+export function transcribeAudio(blob, options = {}) {
+  return request("/transcribe", {
+    ...options,
+    method: "POST",
+    body: blob,
+    raw: true,
+    contentType: blob?.type || "audio/wav",
+    // O modelo pode precisar ser baixado na primeira chamada.
+    timeoutMs: options.timeoutMs ?? 180_000,
+  });
 }

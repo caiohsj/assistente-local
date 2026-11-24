@@ -84,6 +84,19 @@ def test_health_reports_database_and_model(client, fake_llm):
     assert health["model_match"] == "alias"
 
 
+def test_health_reports_voice_config(client, monkeypatch):
+    health = client.get("/health").json()
+    assert health["voice"]["enabled"] is False
+    assert health["voice"]["wake_word"] == "mestre"
+    assert health["voice"]["language"] == "pt-BR"
+
+    monkeypatch.setattr(settings, "voice_enabled", True)
+    monkeypatch.setattr(settings, "voice_wake_word", "ok mestre")
+    health = client.get("/health").json()
+    assert health["voice"]["enabled"] is True
+    assert health["voice"]["wake_word"] == "ok mestre"
+
+
 def test_health_single_model_fallback(client, fake_llm):
     fake_llm.models.data = [SimpleNamespace(id="Qwen/Qwen3-4B-GGUF:Q4_K_M", aliases=[])]
     health = client.get("/health").json()

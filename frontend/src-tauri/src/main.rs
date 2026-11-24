@@ -3,5 +3,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    assistente_local_lib::run()
+    mestre_lib::run()
 }

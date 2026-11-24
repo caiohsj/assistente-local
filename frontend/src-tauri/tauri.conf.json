@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Assistente Local",
+  "productName": "Mestre",
   "version": "0.4.0",
   "identifier": "com.assistente.local",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Assistente Local",
+        "title": "Mestre",
         "width": 420,
         "height": 600,
         "minWidth": 340,

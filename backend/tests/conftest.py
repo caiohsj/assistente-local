@@ -78,6 +78,14 @@ def isolated_db(tmp_path, monkeypatch):
         "terminal=x-terminal-emulator|gnome-terminal|konsole|alacritty|kitty|xterm",
     )
     monkeypatch.setattr(settings, "tool_open_app_deny", "")
+    monkeypatch.setattr(settings, "voice_enabled", False)
+    monkeypatch.setattr(settings, "voice_wake_word", "mestre")
+    monkeypatch.setattr(settings, "voice_language", "pt-BR")
+    monkeypatch.setattr(settings, "voice_stt_model", "tiny")
+    monkeypatch.setattr(settings, "voice_stt_device", "cpu")
+    monkeypatch.setattr(settings, "voice_stt_compute_type", "int8")
+    monkeypatch.setattr(settings, "voice_stt_language", "pt")
+    monkeypatch.setattr(settings, "voice_max_audio_bytes", 10_485_760)
     init_db()
     yield
     app.dependency_overrides.clear()

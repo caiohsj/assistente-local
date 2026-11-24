@@ -12,6 +12,7 @@ from .config import settings
 from .db import add_message, database_ok, init_db, recent_messages
 from .llm import close_llm, get_llm
 from .schemas import ChatRequest, ChatResponse, ToolInvokeRequest
+from .stt import SttUnavailableError, stt_available, transcribe
 from .tools import ToolRegistry, build_registry
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ async def lifespan(app: FastAPI):
     await close_llm()
 
 
-app = FastAPI(title="Assistente Local API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Mestre API", version="0.4.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[],
@@ -97,7 +98,52 @@ async def health(
             "roots": len(settings.read_roots_list) if registry.file_family_enabled else 0,
             "count": len(registry.tools),
         },
+        "voice": {
+            "enabled": settings.voice_enabled,
+            "wake_word": settings.voice_wake_word,
+            "language": settings.voice_language,
+            "stt_available": stt_available(),
+            "stt_model": settings.voice_stt_model,
+        },
     }
+
+
+@app.post("/transcribe")
+async def transcribe_audio(request: Request):
+    """Transcreve um arquivo de áudio curto enviado como corpo bruto (WAV)."""
+    if not settings.voice_enabled:
+        raise HTTPException(status_code=403, detail="Captura de voz desabilitada.")
+
+    content_type = request.headers.get("content-type", "")
+    if content_type and not content_type.startswith(
+        ("audio/", "application/octet-stream")
+    ):
+        raise HTTPException(status_code=415, detail="Conteúdo de áudio inválido.")
+
+    # Rejeita pelo cabeçalho antes de bufferizar o corpo inteiro em memória.
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > settings.voice_max_audio_bytes:
+        raise HTTPException(status_code=413, detail="Áudio muito grande.")
+
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(status_code=400, detail="Áudio vazio.")
+    if len(audio) > settings.voice_max_audio_bytes:
+        raise HTTPException(status_code=413, detail="Áudio muito grande.")
+    if audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+        raise HTTPException(status_code=400, detail="Áudio WAV inválido.")
+
+    try:
+        text = await asyncio.to_thread(transcribe, audio, settings)
+    except SttUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Falha ao transcrever áudio")
+        raise HTTPException(status_code=503, detail="Falha ao transcrever o áudio.") from None
+
+    return {"text": text}
 
 
 @app.get("/history")

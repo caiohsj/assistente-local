@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AssistantControls from "./AssistantControls.jsx";
@@ -144,9 +144,48 @@ describe("AssistantControls", () => {
     expect(onChange).not.toHaveBeenCalledWith("");
   });
 
-  it("microfone permanece desabilitado e erro aparece como alerta", () => {
+  it("microfone permanece desabilitado sem a env var e erro aparece como alerta", () => {
     setup({ error: "Backend local indisponível." });
-    expect(screen.getByRole("button", { name: "Microfone (em breve)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Microfone desabilitado" })).toBeDisabled();
+    expect(screen.queryByRole("group", { name: "Modo de ativação por voz" })).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent("Backend local indisponível.");
+  });
+
+  it(" habilita o microfone e alterna os modos quando a voz está disponível", () => {
+    const onVoiceToggle = vi.fn();
+    const onVoiceModeChange = vi.fn();
+    setup({
+      voiceEnabled: true,
+      voiceStatus: "idle",
+      voiceMode: "shortcut",
+      wakeWord: "mestre",
+      onVoiceToggle,
+      onVoiceModeChange,
+    });
+
+    const mic = screen.getByRole("button", { name: "Iniciar captura de voz" });
+    expect(mic).toBeEnabled();
+    fireEvent.click(mic);
+    expect(onVoiceToggle).toHaveBeenCalledTimes(1);
+
+    const modes = screen.getByRole("group", { name: "Modo de ativação por voz" });
+    expect(within(modes).getByRole("button", { name: "atalho" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    fireEvent.click(within(modes).getByRole("button", { name: 'dizer “mestre”' }));
+    expect(onVoiceModeChange).toHaveBeenCalledWith("wake");
+  });
+
+  it("mostra o estado de escuta no hint", () => {
+    setup({ voiceEnabled: true, voiceStatus: "listening" });
+    expect(screen.getByText("Ouvindo… fale sua mensagem")).toBeInTheDocument();
+  });
+
+  it("mostra o erro de voz como alerta", () => {
+    setup({ voiceEnabled: true, voiceError: "Permissão de microfone negada." });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Permissão de microfone negada."
+    );
   });
 });
