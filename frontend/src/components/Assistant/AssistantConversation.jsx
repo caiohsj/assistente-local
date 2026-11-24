@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import MarkdownMessage from "./MarkdownMessage.jsx";
 
 function messageClass(message) {
   const classes = [
@@ -38,7 +39,13 @@ export default function AssistantConversation({ messages = [], toolCalls = [], s
             {message.failed ? <span className="assistant-message__failed-label">não enviada</span> : null}
             {message.error ? <span className="assistant-message__error-label">erro</span> : null}
           </div>
-          <p className="assistant-message__text">{message.content}</p>
+          {message.role === "user" ? (
+            <p className="assistant-message__text">{message.content}</p>
+          ) : (
+            <div className="assistant-message__text">
+              <MarkdownMessage content={message.content} />
+            </div>
+          )}
         </article>
       ))}
 

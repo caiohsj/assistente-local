@@ -279,6 +279,7 @@ O smoke falha se o backend ou o banco estiverem indisponíveis e, por padrão, e
 16. No modo wake word, chame "Mestre" duas vezes seguidas: a escuta deve rearmar após a primeira captura (só um reconhecedor ativo por vez).
 17. Reinicie o app: o modo deve voltar para **Atalho**, sem reabrir o microfone automaticamente.
 18. No desktop, confirme em `/health` que `voice.stt_available` é `true`; na primeira captura o modelo `tiny` é baixado e o status mostra **Transcrevendo…**.
+19. Peça uma resposta com negrito, lista e bloco de código: o texto deve aparecer formatado (sem os marcadores `**`, `-` e ```).
 
 ## Limitações atuais
 
