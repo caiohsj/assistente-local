@@ -6,6 +6,7 @@ import {
   fetchHistory,
   isAbortError,
   sendChatMessage,
+  speakText,
 } from "./api.js";
 
 function jsonResponse(data, { ok = true, status = 200 } = {}) {
@@ -90,6 +91,35 @@ describe("api.js", () => {
       })
     );
     expect(MESSAGE_MAX_LENGTH).toBe(12000);
+  });
+
+  it("speakText devolve Blob e mantém erros do FastAPI", async () => {
+    const blob = new Blob(["wav"], { type: "audio/wav" });
+    globalThis.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: vi.fn(async () => blob),
+    });
+
+    await expect(speakText("oi")).resolves.toBe(blob);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8765/speak",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ text: "oi" }),
+      })
+    );
+
+    globalThis.fetch.mockResolvedValue(
+      jsonResponse(
+        { detail: "Resposta falada desabilitada." },
+        { ok: false, status: 403 }
+      )
+    );
+    await expect(speakText("oi")).rejects.toMatchObject({
+      status: 403,
+      detail: "Resposta falada desabilitada.",
+    });
   });
 
   it("503 expõe status e detail amigável do FastAPI", async () => {

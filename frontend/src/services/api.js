@@ -37,7 +37,15 @@ async function parseJson(response) {
 
 async function request(
   path,
-  { method = "GET", body, raw = false, contentType, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}
+  {
+    method = "GET",
+    body,
+    raw = false,
+    binary = false,
+    contentType,
+    signal,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+  } = {}
 ) {
   const controller = new AbortController();
   const forwardAbort = () => controller.abort(signal.reason);
@@ -71,15 +79,16 @@ async function request(
     signal?.removeEventListener("abort", forwardAbort);
   }
 
-  const data = await parseJson(response);
   if (!response.ok) {
+    const data = await parseJson(response);
     const detail = typeof data?.detail === "string" ? data.detail : undefined;
     throw new ApiError(detail || `Falha em ${path}: ${response.status}`, {
       status: response.status,
       detail,
     });
   }
-  return data;
+  // /speak devolve WAV, não JSON. Erros continuam sendo lidos como JSON acima.
+  return binary ? response.blob() : parseJson(response);
 }
 
 /** GET /health → { backend, llama_server, database, model_available, tools } */
@@ -95,6 +104,17 @@ export function fetchHistory(limit = 100, options = {}) {
 /** POST /chat → { reply, model, tool_calls: [...] } */
 export function sendChatMessage(message, options = {}) {
   return request("/chat", { ...options, method: "POST", body: { message } });
+}
+
+/** POST /speak → Blob WAV. Corpo JSON; timeout longo por causa do primeiro download da voz. */
+export function speakText(text, options = {}) {
+  return request("/speak", {
+    ...options,
+    method: "POST",
+    body: { text },
+    binary: true,
+    timeoutMs: options.timeoutMs ?? 180_000,
+  });
 }
 
 /** POST /transcribe → { text }. Corpo bruto (WAV), não JSON. */

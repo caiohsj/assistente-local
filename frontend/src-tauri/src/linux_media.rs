@@ -1,4 +1,5 @@
-//! Habilita captura de microfone no WebView WebKitGTK (Tauri no Linux).
+//! Habilita captura de microfone e reprodução de áudio no WebView WebKitGTK
+//! (Tauri no Linux).
 //!
 //! O WebKitGTK desliga `enable-media-stream` por padrão e nega qualquer
 //! `UserMediaPermissionRequest` não respondido. O Tauri/wry não conecta esse
@@ -40,6 +41,9 @@ pub fn enable_media_capture(window: &tauri::WebviewWindow) {
             settings.set_enable_media_stream(true);
             settings.set_enable_mediasource(true);
             settings.set_enable_webrtc(true);
+            // O WAV da resposta começa depois de um round-trip ao backend,
+            // sem gesto do usuário. Sem isso o WebKitGTK bloqueia o áudio.
+            settings.set_media_playback_requires_user_gesture(false);
         }
 
         // Deny-by-default: só a origem do próprio app pode usar microfone/câmera.

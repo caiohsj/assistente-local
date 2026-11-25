@@ -61,7 +61,8 @@ fn show_window(window: &WebviewWindow) {
     let _ = window.set_focus();
 }
 
-/// Abre a janela e sinaliza ao frontend para iniciar a captura de voz.
+/// Abre a janela e sinaliza ao frontend para alternar a captura de voz:
+/// o mesmo evento inicia a escuta e, no segundo aperto, encerra e envia o áudio.
 /// O frontend decide se o recurso está habilitado (env + /health) e qual o modo.
 fn request_voice_capture(app: &AppHandle) {
     if let Some(window) = main_window(app) {

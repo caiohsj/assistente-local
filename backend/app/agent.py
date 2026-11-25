@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 from .config import Settings
 from .db import add_tool_call
 from .prompts import build_system_prompt
+from .replies import normalize_question, short_reply_for
 from .schemas import ToolCallSummary
 from .tools import ToolError, ToolRegistry
 from .tools.apps import audit_arguments
@@ -82,6 +83,48 @@ def _forced_open_tool(message: Any, registry: "ToolRegistry") -> str | None:
         return None
     if "open_app" in registry.tools:
         return "open_app"
+    return None
+
+
+def _forced_factual_tool(message: Any, registry: "ToolRegistry") -> str | None:
+    """Força a ferramenta de dado atual em perguntas factuais simples.
+
+    Sem isso o modelo responde "de cabeça" copiando valores de mensagens
+    antigas do histórico — era o caso da hora repetida em várias perguntas.
+    """
+    if not isinstance(message, str):
+        return None
+    question = normalize_question(message)
+    if not question or len(question.split()) > 9:
+        return None
+    if any(
+        marker in question
+        for marker in ("o que", "explique", "como", "por que", "diferença", "significa")
+    ):
+        return None
+
+    if "get_current_datetime" in registry.tools and any(
+        word in question for word in ("hora", "horas", "horario")
+    ):
+        if not any(
+            word in question
+            for word in ("toquio", "utc", "fuso", "data", "dia", "semana", "clima")
+        ):
+            return "get_current_datetime"
+
+    if "get_system_info" in registry.tools and any(
+        word in question
+        for word in ("memoria", "cpu", "processador", "gpu", "placa")
+    ):
+        return "get_system_info"
+
+    if (
+        "get_disk_usage" in registry.tools
+        and "disco" in question
+        and not any(word in question for word in ("memoria", "cpu", "gpu"))
+    ):
+        return "get_disk_usage"
+
     return None
 
 
@@ -233,7 +276,10 @@ async def run_agent(
     current = next(
         (item for item in reversed(history) if item.get("role") == "user"), None
     )
-    forced_tool = _forced_open_tool(current.get("content") if current else None, registry)
+    current_content = current.get("content") if current else None
+    forced_tool = _forced_factual_tool(current_content, registry) or _forced_open_tool(
+        current_content, registry
+    )
 
     if forced_tool and current is not None:
         # Pedidos explícitos de abertura não precisam do histórico: mensagens
@@ -245,6 +291,7 @@ async def run_agent(
     messages.extend({"role": item["role"], "content": item["content"]} for item in context)
 
     summaries: list[ToolCallSummary] = []
+    tool_payloads: dict[str, dict] = {}
     rounds = 0
     calls = 0
 
@@ -278,7 +325,10 @@ async def run_agent(
         tool_calls = list(getattr(message, "tool_calls", None) or [])
 
         if not can_call or not tool_calls:
-            return AgentResult(reply=message.content or "", tool_calls=summaries)
+            # Perguntas factuais simples saem direto do payload da ferramenta:
+            # o modelo insiste em transformá-las em relatório com Markdown.
+            reply = short_reply_for(current_content, tool_payloads) or (message.content or "")
+            return AgentResult(reply=reply, tool_calls=summaries)
 
         messages.append(_assistant_message(message, tool_calls))
 
@@ -315,6 +365,7 @@ async def run_agent(
             summary, payload = await execute_tool(
                 registry, call.function.name, arguments, settings
             )
+            tool_payloads[call.function.name] = payload
             summaries.append(summary)
             messages.append(
                 {

@@ -48,8 +48,8 @@ class Settings(BaseSettings):
     )
     tool_open_app_deny: str = ""
 
-    # Voz (captura via Web Speech API no frontend). O backend apenas anuncia a
-    # disponibilidade e os parâmetros; nenhum áudio trafega por aqui nesta etapa.
+    # Voz. O backend anuncia os parâmetros e oferece transcrição/síntese local
+    # para o WebView WebKitGTK, que não tem Web Speech API no Linux.
     voice_enabled: bool = False
     voice_wake_word: str = "mestre"
     voice_language: str = "pt-BR"
@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     voice_stt_compute_type: str = "int8"
     voice_stt_language: str = "pt"
     voice_max_audio_bytes: int = 10_485_760
+
+    # TTS local (piper): respostas curtas vindas de uma pergunta falada são
+    # devolvidas como WAV por POST /speak. Exige VOICE_ENABLED no backend.
+    voice_tts_enabled: bool = False
+    voice_tts_voice: str = "pt_BR-faber-medium"
+    voice_tts_data_dir: str = "./data/voices"
+    voice_tts_max_chars: int = 240
+    voice_tts_length_scale: float = 1.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

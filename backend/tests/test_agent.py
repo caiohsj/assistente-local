@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.agent import _forced_open_tool, _summary_for, run_agent
+from app.agent import _forced_factual_tool, _forced_open_tool, _summary_for, run_agent
 from app.config import settings
 from app.db import connect
 from app.tools import ToolError, ToolRegistry, ToolSpec
@@ -41,6 +41,21 @@ def open_registry():
                 parameters={"type": "object", "properties": {}},
                 handler=lambda **kwargs: {"launched": True},
                 family="apps",
+            )
+        )
+    return registry
+
+
+def factual_registry():
+    registry = ToolRegistry(settings)
+    for name in ("get_current_datetime", "get_system_info", "get_disk_usage"):
+        registry.register(
+            ToolSpec(
+                name=name,
+                description=f"Teste de {name}.",
+                parameters={"type": "object", "properties": {}},
+                handler=lambda: {},
+                family="system",
             )
         )
     return registry
@@ -286,3 +301,49 @@ async def test_agent_without_tools_does_not_send_tools(isolated_db):
     assert result.reply == "só conversa"
     assert result.tool_calls == []
     assert "tools" not in llm.completions.calls[0]
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("Que horas são?", "get_current_datetime"),
+        ("Qual o uso de memória?", "get_system_info"),
+        ("Quanto disco livre?", "get_disk_usage"),
+        ("O que é CPU?", None),
+        ("Que horas são em Tóquio?", None),
+        ("Me explique como funciona o disco rígido", None),
+    ],
+)
+def test_forca_ferramenta_apenas_em_pergunta_factual(question, expected):
+    assert _forced_factual_tool(question, factual_registry()) == expected
+
+
+@pytest.mark.asyncio
+async def test_agent_ignora_relatorio_do_modelo_em_pergunta_factual(isolated_db):
+    registry = ToolRegistry(settings)
+    registry.register(
+        ToolSpec(
+            name="get_current_datetime",
+            description="Data e hora atuais.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: {"time_pt_br": "15:15:00", "date_pt_br": "24/11/2026"},
+            family="system",
+        )
+    )
+    llm = FakeLLM()
+    llm.completions.responses.extend(
+        [
+            make_completion(tool_calls=[make_tool_call("get_current_datetime", {}, "call-a")]),
+            make_completion("Horas atuais:\n\nLocal: 15:15:00 (UTC-04).\nSe precisar de mais detalhes, avise! 😊"),
+        ]
+    )
+
+    result = await run_agent(
+        llm,
+        registry,
+        [{"role": "user", "content": "Que horas são?"}],
+        settings,
+    )
+
+    assert result.reply == "São quinze horas e quinze minutos."
+    assert result.tool_calls[0].tool == "get_current_datetime"

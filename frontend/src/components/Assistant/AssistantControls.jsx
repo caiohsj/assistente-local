@@ -28,6 +28,8 @@ export default function AssistantControls({
   wakeWord = "mestre",
   onVoiceModeChange,
   onVoiceToggle,
+  speaking = false,
+  onStopSpeaking,
 }) {
   const canSend = Boolean(value.trim()) && !sending;
   const micDisabled = !voiceEnabled || sending || voiceStatus === "transcribing";
@@ -67,7 +69,9 @@ export default function AssistantControls({
     ? error
     : voiceError
       ? voiceError
-      : voiceStatus === "listening"
+      : speaking
+        ? "Mestre está falando… toque para parar"
+        : voiceStatus === "listening"
         ? "Ouvindo… fale sua mensagem"
         : voiceStatus === "transcribing"
           ? "Transcrevendo sua fala…"
@@ -109,6 +113,17 @@ export default function AssistantControls({
         >
           <span aria-hidden="true">{voiceStatus === "listening" ? "■" : "✦"}</span>
         </button>
+        {speaking && (
+          <button
+            type="button"
+            className="assistant-controls__stop-speech"
+            onClick={onStopSpeaking}
+            title="Parar resposta falada"
+            aria-label="Parar resposta falada"
+          >
+            <span aria-hidden="true">■</span>
+          </button>
+        )}
         <button
           type="submit"
           className="assistant-controls__send"

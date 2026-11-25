@@ -74,7 +74,7 @@ export function useAssistant() {
   const clearError = useCallback(() => setError(null), []);
 
   const sendMessage = useCallback(
-    async (raw, { onAccepted } = {}) => {
+    async (raw, { onAccepted, source = "text" } = {}) => {
       const text = (raw ?? "").trim();
       if (!text) return { ok: false, clearInput: false, error: "Digite uma mensagem." };
       if (text.length > MESSAGE_MAX_LENGTH) {
@@ -129,7 +129,12 @@ export function useAssistant() {
         }
         // O /history substitui a bolha provisória pela linha persistida.
         await loadHistory();
-        return { ok: true, clearInput: true };
+        return {
+          ok: true,
+          clearInput: true,
+          reply: String(result?.reply ?? ""),
+          source,
+        };
       } catch (err) {
         if (isAbortError(err)) {
           markFailed();

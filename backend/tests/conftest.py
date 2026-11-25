@@ -86,6 +86,11 @@ def isolated_db(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "voice_stt_compute_type", "int8")
     monkeypatch.setattr(settings, "voice_stt_language", "pt")
     monkeypatch.setattr(settings, "voice_max_audio_bytes", 10_485_760)
+    monkeypatch.setattr(settings, "voice_tts_enabled", False)
+    monkeypatch.setattr(settings, "voice_tts_voice", "pt_BR-faber-medium")
+    monkeypatch.setattr(settings, "voice_tts_data_dir", str(tmp_path / "voices"))
+    monkeypatch.setattr(settings, "voice_tts_max_chars", 240)
+    monkeypatch.setattr(settings, "voice_tts_length_scale", 1.0)
     init_db()
     yield
     app.dependency_overrides.clear()

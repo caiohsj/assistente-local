@@ -15,6 +15,20 @@ class ChatRequest(BaseModel):
         return value
 
 
+class SpeakRequest(BaseModel):
+    # Limite externo do endpoint; o limite de "resposta falável" é configurável
+    # em VOICE_TTS_MAX_CHARS e aplicado no sintetizador.
+    text: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("text")
+    @classmethod
+    def strip_and_reject_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("o texto não pode estar vazio")
+        return value
+
+
 class ToolCallSummary(BaseModel):
     tool: str
     summary: str = ""

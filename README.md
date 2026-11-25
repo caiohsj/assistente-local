@@ -122,6 +122,7 @@ Regras de segurança:
 - Ferramentas de leitura disponíveis: `list_dir`, `read_file`, `search_text`, `get_system_info`, `get_disk_usage`, `list_processes`, `get_current_datetime`. A abertura de apps/sites está na seção seguinte.
 - `list_processes` não retorna `cmdline`. GPU usa `nvidia-smi` com argv fixo, `shell=False` e timeout; ausência degrada para `available: false`.
 - Toda chamada gera auditoria em `tool_calls` (`tool`, `args_json`, `ok`, `error_code`, `duration_ms`, `result_chars`), sem conteúdo de arquivos.
+- Perguntas factuais simples respondidas por ferramenta (hora, memória, CPU, GPU, disco, abrir app/site) recebem **uma frase curta**, sem Markdown nem detalhes extras: “Que horas são?” → “São três horas e quinze minutos.”; “Qual o uso de memória?” → “O uso de memória está em 40%.”. Essas respostas são montadas diretamente do resultado da ferramenta (`app/replies.py`), sem depender do texto do modelo; perguntas complexas continuam usando Markdown, tabelas e blocos de código.
 
 ### Abertura de aplicativos e sites (Etapa 3)
 
@@ -179,6 +180,11 @@ O assistente se chama **Mestre**. A voz é **desligada por padrão** e exige as 
 | `VOICE_MAX_AUDIO_BYTES` | `backend/.env` | `10485760` | Limite do corpo em `/transcribe` |
 | `VITE_VOICE_ENABLED` | `frontend/.env` | `false` | Lido no build do Vite (também vale para `tauri:build`) |
 | `VITE_VOICE_LANGUAGE` | `frontend/.env` | `pt-BR` | Usado apenas se o backend não informar `VOICE_LANGUAGE` |
+| `VOICE_TTS_ENABLED` | `backend/.env` | `false` | Habilita `POST /speak` (exige `VOICE_ENABLED=true`) |
+| `VOICE_TTS_VOICE` | `backend/.env` | `pt_BR-faber-medium` | Voz neural do Piper |
+| `VOICE_TTS_DATA_DIR` | `backend/.env` | `./data/voices` | Onde a voz (~63 MB) é baixada e mantida |
+| `VOICE_TTS_MAX_CHARS` | `backend/.env` | `240` | Tamanho máximo da resposta que pode ser falada |
+| `VOICE_TTS_LENGTH_SCALE` | `backend/.env` | `1.0` | Duração das sílabas (>`1` mais lento) |
 
 ```bash
 # backend/.env
@@ -191,6 +197,12 @@ VOICE_STT_MODEL=tiny
 VOICE_STT_DEVICE=cpu
 VOICE_STT_COMPUTE_TYPE=int8
 VOICE_STT_LANGUAGE=pt
+
+# Resposta falada (TTS local com piper) — exige VOICE_ENABLED=true
+VOICE_TTS_ENABLED=true
+VOICE_TTS_VOICE=pt_BR-faber-medium
+VOICE_TTS_DATA_DIR=./data/voices
+VOICE_TTS_MAX_CHARS=240
 ```
 
 ```bash
@@ -215,6 +227,21 @@ No Linux o Rust habilita `enable-media-stream` no WebKitGTK e responde ao pedido
 
 > Na primeira transcrição local o modelo é baixado do HuggingFace (o `tiny` tem ~75 MB) e carregado em memória. A primeira chamada pode demorar alguns segundos; depois fica rápido. O `faster-whisper` já faz parte de `backend/requirements.txt`.
 
+### Respostas faladas (TTS local)
+
+Quando a pergunta veio por voz **e** a resposta é curta e simples, o Mestre também responde em áudio: o texto continua aparecendo formatado na tela e o backend gera um WAV em `POST /speak`. Mensagens digitadas **nunca** geram áudio. Respostas com lista, título, tabela, bloco de código, mais de um parágrafo, mais de `VOICE_TTS_MAX_CHARS` caracteres ou mais de três frases ficam apenas em texto, em silêncio.
+
+A voz é a `pt_BR-faber-medium` do Piper (incluída em `backend/requirements.txt`) e é baixada automaticamente no primeiro uso para `backend/data/voices/`. Para baixar antes e evitar a latência da primeira fala:
+
+```bash
+cd backend
+.venv/bin/python -m piper.download_voices pt_BR-faber-medium --data-dir data/voices
+```
+
+Enquanto o assistente fala, a wake word fica pausada para ele não ouvir a própria voz. O botão **Parar áudio** aparece só durante a fala; iniciar uma nova captura ou enviar uma mensagem digitada também interrompe o áudio. No desktop, o CSP do WebView libera `media-src blob:` e o WebKitGTK é configurado para não exigir gesto do usuário na reprodução. Nenhum texto ou áudio vai para serviços externos de TTS.
+
+> `piper-tts` é licenciado como GPL-3.0. Isso não afeta o uso local, mas precisa ser considerado se o projeto for distribuído.
+
 **Limitações importantes:** no modo wake word com STT local o microfone fica aberto continuamente e o áudio é transcrito em janelas de ~3,5 s (consumo de CPU maior e latência de até esse valor). A gravação **não para** durante a transcrição, mas atrasos do modelo podem atrasar o reconhecimento da palavra. Reconhecimento contínuo em janela oculta pode ser suspenso pelo sistema — o modo wake word é mais confiável com a janela visível. A precisão depende do modelo (`tiny` prioriza velocidade); variações como "mestri" também são aceitas. Em builds de desenvolvimento, o console mostra o que o STT ouviu (`[voz] wake ouviu: ...`), útil para calibrar o modelo.
 
 ### Endpoints
@@ -225,6 +252,7 @@ No Linux o Rust habilita `enable-media-stream` no WebKitGTK e responde ao pedido
 | `GET` | `/history?limit=100` | Histórico (1–500, inclui linhas de erro) |
 | `POST` | `/chat` | Conversa com loop de ferramentas |
 | `POST` | `/transcribe` | Áudio bruto (WAV) → `{ "text": "..." }` via faster-whisper |
+| `POST` | `/speak` | `{ "text": "..." }` → WAV (voz Piper local) |
 | `GET` | `/tools` | Matriz de habilitação, raízes, aliases, denylist, domínios e caps |
 | `POST` | `/tools/{name}` | Execução direta para depuração |
 
@@ -273,13 +301,16 @@ O smoke falha se o backend ou o banco estiverem indisponíveis e, por padrão, e
 10. Confira em `tool_calls` que a URL foi gravada apenas como `scheme://host`, sem query string nem fragmento.
 11. Com voz desabilitada, confira que o microfone está cinza e que digitar continua funcionando.
 12. Com as duas variáveis ligadas, clique no microfone, fale e confirme que a transcrição vira mensagem no `/history`.
-13. Pressione `Ctrl+Shift+M`: a janela abre e a captura começa; repita no menu da bandeja (**Falar com Mestre**).
+13. Pressione `Ctrl+Shift+M`: a janela abre e a captura começa; pressione de novo para encerrar e enviar o áudio. O item **Falar com Mestre** da bandeja alterna da mesma forma.
 14. Selecione **dizer "mestre"**, chame por Mestre e confirme que a janela abre ouvindo sem enviar a palavra de ativação ao chat.
 15. Negue a permissão de microfone: a UI mostra a mensagem de erro e o modo texto continua disponível.
 16. No modo wake word, chame "Mestre" duas vezes seguidas: a escuta deve rearmar após a primeira captura (só um reconhecedor ativo por vez).
 17. Reinicie o app: o modo deve voltar para **Atalho**, sem reabrir o microfone automaticamente.
 18. No desktop, confirme em `/health` que `voice.stt_available` é `true`; na primeira captura o modelo `tiny` é baixado e o status mostra **Transcrevendo…**.
 19. Peça uma resposta com negrito, lista e bloco de código: o texto deve aparecer formatado (sem os marcadores `**`, `-` e ```).
+20. Com `VOICE_TTS_ENABLED=true`, faça uma pergunta curta por voz: a resposta aparece na tela **e** é falada; o status mostra **Falando…** e o botão **Parar áudio** interrompe.
+21. Faça uma pergunta longa por voz (que gere lista/código): deve aparecer só texto, sem áudio. Digite a mesma pergunta: também sem áudio.
+22. Com **dizer "mestre"** ativo, confirme que a wake word não dispara enquanto o assistente está falando e volta a escutar depois.
 
 ## Limitações atuais
 
@@ -291,6 +322,7 @@ O smoke falha se o backend ou o banco estiverem indisponíveis e, por padrão, e
 - Sem autenticação: o backend e a UI escutam somente em `127.0.0.1`. Não exponha essas portas na rede.
 - GPU NVIDIA é opcional; a ausência de `nvidia-smi` não quebra a ferramenta de sistema.
 - No desktop (Tauri/Linux) a transcrição usa o modelo local `tiny`; áudio trafega apenas entre o WebView e o backend, em loopback. No navegador, a Web Speech API pode usar o provedor do navegador.
+- A resposta falada só cobre texto curto e simples; não há leitura de respostas longas nem botão para ouvir mensagens antigas. A primeira síntese baixa a voz (~63 MB).
 - O modo wake word mantém o reconhecedor contínuo remontando enquanto estiver selecionado — isso consome recursos e pode ser suspenso em janela oculta.
 
 ## MVP Desktop (Tauri 2)

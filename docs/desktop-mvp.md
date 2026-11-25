@@ -1,6 +1,6 @@
 # MVP Desktop — Mestre
 
-Janela flutuante residente com ícone na bandeja do sistema, construída com **Tauri 2 + React + Vite** e ligada ao backend Python/FastAPI já existente. A conversa acontece na janela desktop sem reconstruir a interface e sem substituir o Python. A captura de voz (STT) é opcional: no WebView WebKitGTK do Linux usa gravação local + faster-whisper no backend; síntese de voz (TTS) continua fora do escopo.
+Janela flutuante residente com ícone na bandeja do sistema, construída com **Tauri 2 + React + Vite** e ligada ao backend Python/FastAPI já existente. A conversa acontece na janela desktop sem reconstruir a interface e sem substituir o Python. A captura de voz (STT) é opcional: no WebView WebKitGTK do Linux usa gravação local + faster-whisper no backend. Respostas curtas e simples vindas de voz também podem ser faladas com TTS local (Piper) via `POST /speak`.
 
 ## O que este MVP faz
 
@@ -15,7 +15,7 @@ Janela flutuante residente com ícone na bandeja do sistema, construída com **T
 - Com o histórico vazio, mantém o palco original (mascote + status); com mensagens, mostra a conversa rolável com o mascote reduzido.
 - Sem backend, mostra `offline` e o erro sem descartar o texto digitado; com `llama-server` parado, o 503 limpa o campo porque a pergunta foi salva.
 
-Fora do escopo desta etapa: TTS, sidecar/autostart do backend, streaming de tokens, múltiplas conversas, autenticação, exposição da porta em rede e notificações. A voz é opcional (`VOICE_ENABLED` + `VITE_VOICE_ENABLED`); no desktop usa `faster-whisper` via `POST /transcribe`. Detalhes no README.
+Fora do escopo desta etapa: sidecar/autostart do backend, streaming de tokens, múltiplas conversas, autenticação, exposição da porta em rede e notificações. A voz é opcional (`VOICE_ENABLED` + `VITE_VOICE_ENABLED`); no desktop usa `faster-whisper` via `POST /transcribe` e, com `VOICE_TTS_ENABLED`, Piper via `POST /speak`. Detalhes no README.
 
 ## Estrutura adicionada
 
@@ -43,7 +43,7 @@ frontend/
 │   └── main.jsx
 └── src-tauri/
     ├── src/lib.rs                # tray, janela, close→hide, single-instance, comandos, atalho
-    ├── src/linux_media.rs        # habilita getUserMedia no WebKitGTK (origens confiáveis)
+    ├── src/linux_media.rs        # habilita getUserMedia e reprodução de mídia no WebKitGTK
     ├── src/main.rs
     ├── capabilities/default.json # só listen/unlisten de eventos; nenhuma outra API nativa
     ├── tauri.conf.json           # janela, build e empacotamento
@@ -110,7 +110,7 @@ Os artefatos ficam em `frontend/src-tauri/target/release/bundle/` — neste ambi
 - `capabilities/default.json` concede **zero** permissões de API nativa ao frontend.
 - Toda ação sensível passa por comandos próprios em `lib.rs` (`window_show`, `window_hide`, `window_toggle`, `window_start_dragging`, `window_set_always_on_top`, `app_quit`) — o frontend apenas os solicita pelo nome.
 - A janela **não abre portas**: ela apenas faz `fetch` de saída para o FastAPI em loopback (`127.0.0.1:8765` por padrão). Não há plugin HTTP do Tauri; o mesmo `services/api.js` funciona no WebView e no navegador.
-- O CSP em `tauri.conf.json` restringe `connect-src` a `'self'`, `http://127.0.0.1:8765` e `http://localhost:8765`. O CORS do FastAPI (`CORS_ORIGIN_REGEX`) aceita somente loopback e as origens exatas `tauri://localhost` / `http://tauri.localhost`. Nunca use `*`; quem já tem `.env` antigo precisa atualizar a linha manualmente.
+- O CSP em `tauri.conf.json` restringe `connect-src` a `'self'`, `http://127.0.0.1:8765` e `http://localhost:8765`, e libera `media-src 'self' blob:` para o WAV da resposta falada. O CORS do FastAPI (`CORS_ORIGIN_REGEX`) aceita somente loopback e as origens exatas `tauri://localhost` / `http://tauri.localhost`. Nunca use `*`; quem já tem `.env` antigo precisa atualizar a linha manualmente.
 - Nenhuma API nativa de filesystem, shell, diálogo, HTTP ou notificação está habilitada. A única permissão concedida é `core:event:default`, usada para receber o pedido de captura de voz do atalho global; o atalho é registrado no Rust via `tauri-plugin-global-shortcut`.
 - `npm audit --omit=dev` reporta **0 vulnerabilidades** em produção. Os avisos restantes são de dependências de desenvolvimento (esbuild/vite) e afetam apenas o servidor local de dev; nunca exponha a porta 5180 na rede.
 - `skipTaskbar` está `false` para que a janela continue acessível via dock/Alt+Tab mesmo em ambientes sem bandeja. Mude para `true` em `tauri.conf.json` se o alvo tiver AppIndicator garantido.

@@ -4,15 +4,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from openai import AsyncOpenAI
 
 from .agent import execute_tool, run_agent
 from .config import settings
 from .db import add_message, database_ok, init_db, recent_messages
 from .llm import close_llm, get_llm
-from .schemas import ChatRequest, ChatResponse, ToolInvokeRequest
+from .schemas import ChatRequest, ChatResponse, SpeakRequest, ToolInvokeRequest
 from .stt import SttUnavailableError, stt_available, transcribe
+from .tts import TtsUnavailableError, synthesize, tts_available, voice_present
 from .tools import ToolRegistry, build_registry
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,11 @@ async def health(
             "language": settings.voice_language,
             "stt_available": stt_available(),
             "stt_model": settings.voice_stt_model,
+            "tts_enabled": settings.voice_tts_enabled,
+            "tts_available": tts_available(),
+            "tts_voice_present": voice_present(settings),
+            "tts_voice": settings.voice_tts_voice,
+            "tts_max_chars": settings.voice_tts_max_chars,
         },
     }
 
@@ -144,6 +150,29 @@ async def transcribe_audio(request: Request):
         raise HTTPException(status_code=503, detail="Falha ao transcrever o áudio.") from None
 
     return {"text": text}
+
+
+@app.post("/speak")
+async def speak(payload: SpeakRequest):
+    """Sintetiza uma resposta curta como WAV (voz local, sem rede externa)."""
+    if not settings.voice_enabled or not settings.voice_tts_enabled:
+        raise HTTPException(status_code=403, detail="Resposta falada desabilitada.")
+
+    try:
+        audio = await asyncio.to_thread(synthesize, payload.text, settings)
+    except TtsUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Falha ao sintetizar a resposta")
+        raise HTTPException(status_code=503, detail="Falha ao gerar o áudio.") from None
+
+    return Response(
+        content=audio,
+        media_type="audio/wav",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/history")

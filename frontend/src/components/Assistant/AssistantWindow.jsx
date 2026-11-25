@@ -7,6 +7,8 @@ import AssistantConversation from "./AssistantConversation.jsx";
 import { useAssistant } from "../../hooks/useAssistant.js";
 import { useVoiceCapture } from "../../hooks/useVoiceCapture.js";
 import { useWakeWord } from "../../hooks/useWakeWord.js";
+import { useSpeechPlayback } from "../../hooks/useSpeechPlayback.js";
+import { buildSpeech } from "../../services/tts.js";
 import { useWindowControls } from "../../hooks/useWindowControls.js";
 
 const VOICE_REQUEST_EVENT = "mestre://voice-request";
@@ -38,24 +40,68 @@ export default function AssistantWindow() {
   const wakeRef = useRef(null);
   const captureStatusRef = useRef(null);
   const startingCaptureRef = useRef(false);
+  const speechStatusRef = useRef("idle");
 
   // A válvula é dupla: o build do frontend e o backend têm que habilitar voz.
   const frontendVoiceEnabled = import.meta.env.VITE_VOICE_ENABLED === "true";
   const voiceEnabled = frontendVoiceEnabled && voice?.enabled === true;
   const language = voice?.language || import.meta.env.VITE_VOICE_LANGUAGE || "pt-BR";
   const wakeWord = voice?.wake_word || "mestre";
+  // O TTS segue a válvula de voz e a chave de síntese do backend.
+  const ttsEnabled =
+    voiceEnabled && voice?.tts_enabled === true && voice?.tts_available === true;
+  const speechMaxChars = voice?.tts_max_chars || 240;
+
+  const canResumeWake = useCallback(
+    () =>
+      voiceModeRef.current === "wake" &&
+      !startingCaptureRef.current &&
+      captureStatusRef.current !== "listening" &&
+      captureStatusRef.current !== "transcribing",
+    []
+  );
+
+  const speech = useSpeechPlayback({
+    enabled: ttsEnabled,
+    onStart: () => {
+      // O assistente não pode ouvir a própria voz.
+      if (voiceModeRef.current === "wake") wakeRef.current?.pause();
+    },
+    onEnd: () => {
+      if (canResumeWake()) wakeRef.current?.resume();
+    },
+    onError: (message) => setVoiceError(message),
+  });
+  speechStatusRef.current = speech.status;
 
   const handleTranscript = useCallback(
     async (text) => {
       setVoiceError(null);
-      const result = await sendMessage(text);
+      const result = await sendMessage(text, { source: "voice" });
       if (result?.error) setVoiceError(result.error);
+      // Só fala o que veio de voz e passou no filtro de resposta curta/simples.
+      const spoken = result?.ok
+        ? buildSpeech(result.reply, { maxChars: speechMaxChars })
+        : null;
+      if (spoken && ttsEnabled) void speech.speak(spoken);
     },
-    [sendMessage]
+    [sendMessage, speechMaxChars, speech.speak, ttsEnabled]
   );
+
+  // Texto digitado sempre termina em Markdown na tela — nunca em áudio.
+  const handleSend = useCallback(
+    async (text, options) => {
+      if (speechStatusRef.current !== "idle") speech.stop();
+      return sendMessage(text, { ...options, source: "text" });
+    },
+    [sendMessage, speech.stop]
+  );
+
   const handleVoiceError = useCallback((message) => setVoiceError(message), []);
   const handleCaptureSettled = useCallback(() => {
-    if (voiceMode === "wake") wakeRef.current?.resume();
+    if (voiceMode === "wake" && speechStatusRef.current === "idle") {
+      wakeRef.current?.resume();
+    }
   }, [voiceMode]);
 
   const capture = useVoiceCapture({
@@ -70,6 +116,8 @@ export default function AssistantWindow() {
   // Um único reconhecedor por documento: a wake word pausa antes de qualquer
   // captura e só rearma depois que o microfone foi liberado (onSettled).
   const startCapture = useCallback(async () => {
+    // Nunca grave o áudio da própria resposta.
+    if (speechStatusRef.current !== "idle") speech.stop();
     if (startingCaptureRef.current) return false;
     if (sendingRef.current) {
       // Nenhuma captura foi iniciada, então não haverá onSettled: a wake word
@@ -93,7 +141,7 @@ export default function AssistantWindow() {
     } finally {
       startingCaptureRef.current = false;
     }
-  }, [capture.start]);
+  }, [capture.start, speech.stop]);
 
   const handleVoiceToggle = useCallback(async () => {
     if (captureStatusRef.current === "listening") {
@@ -128,8 +176,9 @@ export default function AssistantWindow() {
     };
   }, []);
 
-  // Atalho global do Rust (e item "Falar com Mestre" da bandeja): abrir a
-  // janela e começar a ouvir, independentemente do modo wake word escolhido.
+  // Atalho global do Rust (e item "Falar com Mestre" da bandeja): alterna a
+  // captura. O mesmo atalho que começa a ouvir também encerra e envia o áudio
+  // — o handler precisa ser o toggle, não um start que ignora o segundo aperto.
   useEffect(() => {
     if (!isTauri || !voiceEnabled) return undefined;
     let unlisten;
@@ -138,7 +187,7 @@ export default function AssistantWindow() {
       try {
         const { listen } = await import("@tauri-apps/api/event");
         if (cancelled) return;
-        unlisten = await listen(VOICE_REQUEST_EVENT, startCapture);
+        unlisten = await listen(VOICE_REQUEST_EVENT, handleVoiceToggle);
       } catch (voiceEventError) {
         if (import.meta.env.DEV) {
           console.warn("[voz] falha ao escutar atalho:", voiceEventError);
@@ -149,12 +198,13 @@ export default function AssistantWindow() {
       cancelled = true;
       unlisten?.();
     };
-  }, [isTauri, voiceEnabled, startCapture]);
+  }, [isTauri, voiceEnabled, handleVoiceToggle]);
 
   // hover > ouvindo > ativo (janela aberta e focada) > idle
   const state = hovering ? "hover" : focused ? "active" : "idle";
   const hasConversation = messages.length > 0;
   const listening = capture.status === "listening";
+  const speaking = speech.speaking;
 
   // Estado visual e estado de conexão são independentes: o badge do cabeçalho
   // não pode dizer "online" só porque a janela está focada.
@@ -164,15 +214,19 @@ export default function AssistantWindow() {
       ? "listening"
       : capture.status === "transcribing"
         ? "transcribing"
-        : wake.status === "listening"
-          ? "wake"
-          : connection === "offline"
-        ? "offline"
-        : error
-          ? "error"
-          : connection === "checking"
-            ? "connecting"
-            : state;
+        : speech.status === "loading"
+          ? "preparing"
+          : speaking
+            ? "speaking"
+            : wake.status === "listening"
+              ? "wake"
+              : connection === "offline"
+                ? "offline"
+                : error
+                  ? "error"
+                  : connection === "checking"
+                    ? "connecting"
+                    : state;
 
   const mascot = (
     <AssistantMascot
@@ -217,7 +271,9 @@ export default function AssistantWindow() {
       <AssistantControls
         value={draft}
         onChange={setDraft}
-        onSend={sendMessage}
+        onSend={handleSend}
+        speaking={speaking}
+        onStopSpeaking={speech.stop}
         onClearInput={(sent) =>
           setDraft((current) => (current === sent ? "" : current))
         }

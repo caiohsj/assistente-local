@@ -20,6 +20,8 @@ export default function AssistantStatus({ mode = "idle", voiceEnabled = false })
     thinking: { title: "Pensando…", hint: "Consultando o modelo local" },
     transcribing: { title: "Transcrevendo…", hint: "Convertendo sua fala em texto" },
     listening: { title: "Ouvindo…", hint: "Fale sua mensagem para o Mestre" },
+    speaking: { title: "Falando…", hint: "Toque em parar para interromper" },
+    preparing: { title: "Preparando áudio…", hint: "Gerando a resposta falada" },
     wake: { title: "Aguardando “Mestre”…", hint: "Diga o nome para iniciar a captura" },
     error: { title: "Falha ao consultar o modelo", hint: "Verifique a mensagem acima" },
   };

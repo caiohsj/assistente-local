@@ -103,7 +103,12 @@ describe("useAssistant", () => {
       "oi",
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
-    expect(response).toEqual({ ok: true, clearInput: true });
+    expect(response).toEqual({
+      ok: true,
+      clearInput: true,
+      reply: "Olá!",
+      source: "text",
+    });
     // A bolha provisória é substituída pela linha persistida do /history.
     expect(result.current.messages).toEqual([userMessage, assistantMessage]);
     expect(fetchHistory).toHaveBeenCalledTimes(2);
